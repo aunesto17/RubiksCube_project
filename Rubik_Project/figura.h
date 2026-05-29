@@ -12,6 +12,7 @@ class Figura
 protected:
     std::string name;
 public:
+    std::vector<vec3> verticesLocales; // Copia maestra inmóvil para rotaciones de capas
     std::vector<vec3> vertices;
     std::vector<vec3> verticesOrig; // to reset fig
     std::vector<vec3> vertexColors;
@@ -33,6 +34,10 @@ public:
     };
 
     Figura(const std::string & name) : name(name) {}
+
+    // Getters y Setters necesarios para el bucle global de Rubik (cristian)
+    std::vector<vec3> getVerticesLocales() const { return this->verticesLocales; }
+    void setVertices(const std::vector<vec3>& v) { this->vertices = v; }
 
     void updateFig(std::vector<vec3> v){
         vertices = v;

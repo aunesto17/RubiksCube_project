@@ -32,6 +32,10 @@ private:
 
     Camera * camera;
 
+    // cristian
+	float acumTx = 0.0f, acumTy = 0.0f, acumTz = 0.0f;
+	float acumRotX = 0.0f, acumRotY = 0.0f;
+
     float lastFrameTime;
     // rotation affected cubes
 
@@ -74,8 +78,74 @@ public:
     // Helper method to debug slice maps
     void printSliceMap(char slice);
 
+    // cristian
+    void irAlOrigen();
+	void regresarAPosicionGlobal();
+	void actualizarMatrizMundo();
+    //ROTACIONESS
+	void trasladarCuboGlobal(float tx, float ty, float tz);
+	void rotarCuboGlobalX(float angulo);
+	void rotarCuboGlobalY(float angulo);
+
     ~CuboRubik();
 };
+
+void CuboRubik::actualizarMatrizMundo() {
+    Transform t;
+    matriz4x4 mTras = t.traslacion(vec3(acumTx, acumTy, acumTz));
+    matriz4x4 mRotX = t.rotacionX(acumRotX);
+    matriz4x4 mRotY = t.rotacionY(acumRotY);
+
+    // Recorremos todos los cubitos
+    for (auto& pair : cubeMap) {
+        if (pair.second) {
+            // 1. Tomamos los vértices limpios del origen (copia maestra)
+            std::vector<vec3> verticesLimpios = pair.second->getVerticesLocales(); 
+            
+            // 2. Aplicamos la transformación en un ORDEN ESTRICTO que jamás cambia
+            verticesLimpios = mRotY.multFig(verticesLimpios);
+            verticesLimpios = mRotX.multFig(verticesLimpios);
+            verticesLimpios = mTras.multFig(verticesLimpios);
+            
+            // 3. Guardamos el resultado en los vértices de renderizado y subimos a la GPU
+            pair.second->setVertices(verticesLimpios);
+            pair.second->updateBuffers();
+        }
+    }
+}
+
+void CuboRubik::irAlOrigen() {
+    Transform t;
+    // Aplicamos lo opuesto en orden inverso
+    matriz4x4 mRotY = t.rotacionY(-acumRotY);
+    matriz4x4 mRotX = t.rotacionX(-acumRotX);
+    matriz4x4 mTras = t.traslacion(vec3(-acumTx, -acumTy, -acumTz));
+    
+    for (auto& pair : cubeMap) {
+        if (pair.second) {
+            pair.second->applyTransform(mTras);
+            pair.second->applyTransform(mRotX);
+            pair.second->applyTransform(mRotY);
+        }
+    }
+}
+
+void CuboRubik::regresarAPosicionGlobal() {
+    Transform t;
+    // Volvemos a colocarlo donde pertenece
+    matriz4x4 mRotY = t.rotacionY(acumRotY);
+    matriz4x4 mRotX = t.rotacionX(acumRotX);
+    matriz4x4 mTras = t.traslacion(vec3(acumTx, acumTy, acumTz));
+    
+    for (auto& pair : cubeMap) {
+        if (pair.second) {
+            pair.second->applyTransform(mRotY);
+            pair.second->applyTransform(mRotX);
+            pair.second->applyTransform(mTras);
+        }
+    }
+}
+
 
 void CuboRubik::initializeCubes() {
         // Create the 26 outer cubes (excluding center)
@@ -172,13 +242,6 @@ void CuboRubik::rotateFace(char face, float angle) {
     //}
 
     angle = normalizeAngle(angle);
-    // Setup animation
-    //currentAnimation.face = face;
-    //currentAnimation.targetAngle = angle;
-    //currentAnimation.currentAngle = 0.0f;
-    //currentAnimation.isSlice = false;
-    //currentAnimation.isAnimating = true;
-    //currentAnimation.isClockwise = (angle < 0);
 
     affectedCubes.clear();
     if (faceMap.find(std::string(1, face)) != faceMap.end()) {
@@ -773,6 +836,18 @@ void CuboRubik::applyTransform(matriz4x4 m) {
     }
 }
 
+///// ROTACIONEESSS cristian
+void CuboRubik::trasladarCuboGlobal(float tx, float ty, float tz) {
+    acumTx += tx; acumTy += ty; acumTz += tz; // Solo acumulamos el valor
+}
+
+void CuboRubik::rotarCuboGlobalX(float angulo) {
+    acumRotX += angulo; // Solo acumulamos el valor
+}
+
+void CuboRubik::rotarCuboGlobalY(float angulo) {
+    acumRotY += angulo; // Solo acumulamos el valor
+}
 
 CuboRubik::~CuboRubik() {
     /*

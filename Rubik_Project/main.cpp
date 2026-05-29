@@ -346,6 +346,49 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
     // -------------------------------------------------
 
+    // (cristian) 2. TRASLACIÓN CONTINUA DEL CUBO
+    float velocidadTraslacion = 2.5f; // Unidades espaciales por segundo
+    float pasoTraslacion = velocidadTraslacion * deltaTime;
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
+		cuboRubik->irAlOrigen();
+        cuboRubik->trasladarCuboGlobal(pasoTraslacion, 0.0f, 0.0f);
+		cuboRubik->regresarAPosicionGlobal();
+    }
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
+		cuboRubik->irAlOrigen();
+        cuboRubik->trasladarCuboGlobal(-pasoTraslacion, 0.0f, 0.0f);
+		cuboRubik->regresarAPosicionGlobal();
+    }
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
+		cuboRubik->irAlOrigen();
+        cuboRubik->trasladarCuboGlobal(0.0f, pasoTraslacion, 0.0f);
+		cuboRubik->regresarAPosicionGlobal();
+    }
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
+		cuboRubik->irAlOrigen();
+        cuboRubik->trasladarCuboGlobal(0.0f, -pasoTraslacion, 0.0f);
+		cuboRubik->regresarAPosicionGlobal();
+    }
+
+
+    // (cristian )3. ROTACIÓN CONTINUA DEL CUBO GLOBAL (Basada en tiempo real)
+    float velocidadRotacion = 90.0f; // Grados por segundo
+    float pasoAngulo = velocidadRotacion * deltaTime;
+
+    if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) {
+        cuboRubik->rotarCuboGlobalX(pasoAngulo);
+    }
+    if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) {
+        cuboRubik->rotarCuboGlobalX(-pasoAngulo);
+    }
+    if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
+        cuboRubik->rotarCuboGlobalY(pasoAngulo);
+    }
+    if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS) {
+        cuboRubik->rotarCuboGlobalY(-pasoAngulo);
+    }
+
+
     // reset cube
     if (key == GLFW_KEY_K && action == GLFW_PRESS) {
         cuboRubik->resetRubik();

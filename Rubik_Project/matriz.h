@@ -47,6 +47,50 @@ public:
         return res;
     }
 
+    // --- ORTONORMALIZAR LA MATRIZ (Evita deformaciones) ---
+    void ortonormalizar() {
+        // 1. Extraer los componentes de los ejes X, Y, Z desde la matriz (filas 0, 1 y 2)
+        float x_x = mat[0], x_y = mat[1], x_z = mat[2];
+        float y_x = mat[4], y_y = mat[5], y_z = mat[6];
+        float z_x = mat[8], z_y = mat[9], z_z = mat[10];
+
+        // 2. Normalizar el eje X (forzar longitud de 1.0)
+        float magnitudX = sqrt(x_x * x_x + x_y * x_y + x_z * x_z);
+        if (magnitudX > 0.0f) {
+            x_x /= magnitudX; x_y /= magnitudX; x_z /= magnitudX;
+        }
+
+        // 3. Hacer que el eje Y sea perpendicular al eje X: Y = Y - (Y . X) * X
+        float productoPuntoYX = (y_x * x_x) + (y_y * x_y) + (y_z * x_z);
+        y_x -= productoPuntoYX * x_x;
+        y_y -= productoPuntoYX * x_y;
+        y_z -= productoPuntoYX * x_z;
+
+        // Normalizar el nuevo eje Y
+        float magnitudY = sqrt(y_x * y_x + y_y * y_y + y_z * y_z);
+        if (magnitudY > 0.0f) {
+            y_x /= magnitudY; y_y /= magnitudY; y_z /= magnitudY;
+        }
+
+        // 4. Hacer que el eje Z sea perpendicular a X y a Y: Z = Z - (Z . X)*X - (Z . Y)*Y
+        float productoPuntoZX = (z_x * x_x) + (z_y * x_y) + (z_z * x_z);
+        float productoPuntoZY = (z_x * y_x) + (z_y * y_y) + (z_z * y_z);
+        z_x -= (productoPuntoZX * x_x) + (productoPuntoZY * y_x);
+        z_y -= (productoPuntoZX * x_y) + (productoPuntoZY * y_y);
+        z_z -= (productoPuntoZX * x_z) + (productoPuntoZY * y_z);
+
+        // Normalizar el nuevo eje Z
+        float magnitudZ = sqrt(z_x * z_x + z_y * z_y + z_z * z_z);
+        if (magnitudZ > 0.0f) {
+            z_x /= magnitudZ; z_y /= magnitudZ; z_z /= magnitudZ;
+        }
+
+        // 5. Guardar los ejes limpios y corregidos de vuelta en la matriz
+        mat[0] = x_x; mat[1] = x_y; mat[2] = x_z;
+        mat[4] = y_x; mat[5] = y_y; mat[6] = y_z;
+        mat[8] = z_x; mat[9] = z_y; mat[10] = z_z;
+    }
+
 
     ~matriz4x4() {};
 };

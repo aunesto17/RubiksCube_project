@@ -8,11 +8,38 @@
 
 class Camera {
 private:
+    enum class CameraAnimState {
+        NONE,
+        ZOOM_OUT,
+        ROTATING,
+        ZOOM_IN
+    };
+
+    struct CameraAnimation {
+        bool isAnimating = false;
+        CameraAnimState state = CameraAnimState::NONE;
+        float startYaw = 45.0f;
+        float targetYaw = 45.0f;
+        float startDistance = 10.0f;
+        float targetDistance = 10.0f;
+        float animationDuration = 1.0f;
+        float elapsedTime = 0.0f;
+        float rotationSpeed = 0.0f; // degrees per second
+    };
+    /*
     // Fixed isometric view parameters
     float distance = 15.0f;  // Fixed distance
     float pitch = 35.264f;   // True isometric pitch
     float yaw = 45.0f;       // True isometric yaw
     float fov = 45.0f;       // Standard field of view
+    */
+    // Fixed isometric view parameters
+    float distance;
+    float pitch;
+    float yaw; 
+    float fov; 
+
+    vec3 positionOffset;
 
     // Internal Math helpers for vec3 (LookAt & Perspective require these)
     vec3 crossProduct(const vec3& a, const vec3& b) {
@@ -23,30 +50,73 @@ private:
         );
     }
 
-    float dotProduct(const vec3& a, const vec3& b) {
-        return a.getX() * b.getX() + a.getY() * b.getY() + a.getZ() * b.getZ();
-    }
+    // --- Movement speeds ---
+    float orbitSpeed;       
+    float zoomSpeed;        
+    float translationSpeed;
 
-    vec3 normalize(vec3 v) {
-        float length = std::sqrt(v.getX() * v.getX() + v.getY() * v.getY() + v.getZ() * v.getZ());
-        if (length > 0.0f) {
-            return vec3(v.getX() / length, v.getY() / length, v.getZ() / length);
+    // --- Hard limits ---
+    static constexpr float MIN_DISTANCE = 3.0f;
+    static constexpr float MAX_DISTANCE = 40.0f;
+    static constexpr float MIN_FOV = 1.0f;
+    static constexpr float MAX_FOV = 90.0f;
+    static constexpr float MAX_PITCH = 89.9f;
+    static constexpr float MIN_PITCH = -89.9f;
+
+    CameraAnimation cameraAnim;
+
+    // --- Validation Helpers ---
+    void clampPitchWithWarning(float& pitchValue) const {
+        if (pitchValue > MAX_PITCH) {
+            std::cout << "[Camera][WARNING] Pitch clamped to max." << std::endl;
+            pitchValue = MAX_PITCH;
+        } else if (pitchValue < MIN_PITCH) {
+            std::cout << "[Camera][WARNING] Pitch clamped to min." << std::endl;
+            pitchValue = MIN_PITCH;
         }
-        return v;
     }
 
-    float toRadians(float degrees) {
-        return degrees * M_PI / 180.0f;
+    void clampDistanceWithWarning(float& distValue) const {
+        if (distValue < MIN_DISTANCE) {
+            distValue = MIN_DISTANCE;
+        } else if (distValue > MAX_DISTANCE) {
+            distValue = MAX_DISTANCE;
+        }
+    }
+
+    void normalizeYaw(float& yawValue) const {
+        while (yawValue < 0.0f) yawValue += 360.0f;
+        while (yawValue >= 360.0f) yawValue -= 360.0f;
     }
 
 public: 
-    Camera() {}
+    // isometric as default
+    Camera(float initDist = 15.0f, float initPitch = 35.264f, float initYaw = 45.0f, float initFov = 45.0f)
+        : distance(initDist), 
+          pitch(initPitch), 
+          yaw(initYaw), 
+          fov(initFov),
+          positionOffset(0.0f, 0.0f, 0.0f),
+          orbitSpeed(90.0f),
+          zoomSpeed(10.0f),
+          translationSpeed(10.0f) 
+    {
+        clampPitchWithWarning(pitch);
+        clampDistanceWithWarning(distance);
+    }
     
     // Getters
     float getDistance() const { return distance; }
     float getPitch() const { return pitch; }
     float getYaw() const { return yaw; }
     float getFov() const { return fov; }
+    float getMaxDistance() const { return MAX_DISTANCE; }
+
+    // --- Setters ---
+    void setDistance(float d) { distance = d; clampDistanceWithWarning(distance); }
+    void setPitch(float p) { pitch = p; clampPitchWithWarning(pitch); }
+    void setYaw(float y) { yaw = y; normalizeYaw(yaw); }
+    void setFov(float f) { fov = helper::clamp(f, MIN_FOV, MAX_FOV); }
     
     // viewMatrix o LookAt
     matriz4x4 getViewMatrix() {
@@ -87,7 +157,7 @@ public:
     matriz4x4 getPerspectiveMatrix(float aspectRatio) {
         float zNear = 0.1f;
         float zFar = 100.0f;
-        float tanHalfFov = std::tan(toRadians(fov) / 2.0f);
+        float tanHalfFov = std::tan(helper::toRadians(fov) / 2.0f);
 
         matriz4x4 projMat;
         projMat.mat = {
@@ -100,25 +170,95 @@ public:
         return projMat;
     }
 
-    // ---------------------------------------------------------
-    // DUMMY METHODS (Ensures main.cpp continues to compile)
-    // ---------------------------------------------------------
-    void moveForward(float deltaTime) {}
-    void moveBackward(float deltaTime) {}
-    void moveLeft(float deltaTime) {}
-    void moveRight(float deltaTime) {}
-    void zoomIn(float deltaTime) {}
-    void zoomOut(float deltaTime) {}
+    // --- Orbital Movement ---
+    void orbitUp(float deltaTime) { pitch += orbitSpeed * deltaTime; clampPitchWithWarning(pitch); }
+    void orbitDown(float deltaTime) { pitch -= orbitSpeed * deltaTime; clampPitchWithWarning(pitch); }
+    void orbitLeft(float deltaTime) { yaw -= orbitSpeed * deltaTime; normalizeYaw(yaw); }
+    void orbitRight(float deltaTime) { yaw += orbitSpeed * deltaTime; normalizeYaw(yaw); }
+
+    void zoomIn(float deltaTime) { distance -= zoomSpeed * deltaTime; clampDistanceWithWarning(distance); }
+    void zoomOut(float deltaTime) { distance += zoomSpeed * deltaTime; clampDistanceWithWarning(distance); }
+
+    // --- Translation (Panning) ---
+    void translateLeft(float deltaTime) { positionOffset.x -= translationSpeed * deltaTime; }
+    void translateRight(float deltaTime) { positionOffset.x += translationSpeed * deltaTime; }
+    void translateUp(float deltaTime) { positionOffset.y += translationSpeed * deltaTime; }
+    void translateDown(float deltaTime) { positionOffset.y -= translationSpeed * deltaTime; }
+
+    // --- Original Dummy Method Mappings ---
+    // These ensure main.cpp continues to compile perfectly, linking to the new dynamic movement.
+    void moveForward(float deltaTime) { orbitUp(deltaTime); }
+    void moveBackward(float deltaTime) { orbitDown(deltaTime); }
+    void moveLeft(float deltaTime) { orbitLeft(deltaTime); }
+    void moveRight(float deltaTime) { orbitRight(deltaTime); }
     
-    void setMoveSpeed(float speed) {}
-    void setRotateSpeed(float speed) {}
-    void setZoomSpeed(float speed) {}
+    void setMoveSpeed(float speed) { translationSpeed = speed; }
+    void setRotateSpeed(float speed) { orbitSpeed = speed; }
+    void setZoomSpeed(float speed) { zoomSpeed = speed; }
     
-    void reset() {}
+    void reset() {
+        distance = 15.0f;
+        pitch = 35.264f;
+        yaw = 45.0f;
+        fov = 45.0f;
+        positionOffset = vec3(0.0f, 0.0f, 0.0f);
+        cameraAnim = CameraAnimation();
+    }
     
-    void startCameraAnimation(float cubeDuration) {}
-    void updateCameraAnimation(float deltaTime) {}
-    bool isAnimating() const { return false; }
+    // --- Animation System ---
+    void startCameraAnimation(float cubeDuration) {
+        if (cubeDuration <= 0.0f) return;
+
+        cameraAnim.isAnimating = true;
+        cameraAnim.state = CameraAnimState::ZOOM_OUT;
+
+        // Reset to known good starting positions
+        pitch = 25.0f;
+        yaw = 45.0f;
+        distance = 10.0f;
+
+        cameraAnim.startYaw = yaw;
+        cameraAnim.startDistance = distance;
+        cameraAnim.targetDistance = 25.0f;
+        cameraAnim.targetYaw = yaw + 360.0f;
+        cameraAnim.animationDuration = 1.0f;
+        cameraAnim.elapsedTime = 0.0f;
+        cameraAnim.rotationSpeed = 360.0f / cubeDuration;
+    }
+
+    void updateCameraAnimation(float deltaTime) {
+        if (!cameraAnim.isAnimating) return;
+
+        cameraAnim.elapsedTime += deltaTime;
+
+        switch (cameraAnim.state) {
+            case CameraAnimState::ZOOM_OUT: {
+                float t = cameraAnim.elapsedTime / cameraAnim.animationDuration;
+                if (t >= 1.0f) {
+                    distance = cameraAnim.targetDistance;
+                    cameraAnim.state = CameraAnimState::ROTATING;
+                    cameraAnim.elapsedTime = 0.0f;
+                } else {
+                    // Ease-out
+                    float ease_t = 1.0f - (1.0f - t) * (1.0f - t);
+                    distance = helper::mix(cameraAnim.startDistance, cameraAnim.targetDistance, ease_t);
+                }
+                break;
+            }
+            case CameraAnimState::ROTATING: {
+                yaw += cameraAnim.rotationSpeed * deltaTime;
+                if (yaw >= cameraAnim.targetYaw) {
+                    yaw = cameraAnim.startYaw;
+                    cameraAnim.isAnimating = false;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+    
+    bool isAnimating() const { return cameraAnim.isAnimating; }
 };
 
 #endif // CAMERA_H_
