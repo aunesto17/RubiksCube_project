@@ -57,6 +57,7 @@ colorVec getRandomColor() {
 // definimos las figuras
 Camera camera;
 CuboRubik * cuboRubik = new CuboRubik(glfwGetTime(), camera);
+bool isClockwise = true; // direccion de rotacion camadas
 
 Transform trans; // temporal para mover el cubo
 
@@ -110,7 +111,7 @@ const char *fragmentShaderTexSource = "#version 330 core\n"
     "       FragColor = vec4(ourColor, 1.0);\n"
     "   } else {\n"
     "       // Otherwise blend the texture with the face color\n"
-    "       vec3 blendedColor = mix(ourColor, texColor.rgb, 0.5);\n"
+    "       vec3 blendedColor = mix(ourColor, texColor.rgb, 0.7);\n"
     "       FragColor = vec4(blendedColor, 1.0);\n"
     "   }\n"
     "}\0";
@@ -301,9 +302,14 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
-
     
-    
+    // -------------- direccion de rotaciones ------------------
+    if (key == GLFW_KEY_TAB && action == GLFW_PRESS) {
+        isClockwise = !isClockwise;
+        std::cout << "Direccion de rotacion: " 
+                  << (isClockwise ? "Horaria" : "Antihoraria ' ") 
+                  << std::endl;
+    }
     // -------------- MOVIMIENTO CAMARA ------------------
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         camera.moveForward(deltaTime);
@@ -318,32 +324,39 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
         camera.zoomOut(deltaTime);
     // -------------------------------------------------
-    // ---------------- CUBE CONTROLS ------------------
+    // ---------------- CAMADAS ------------------
     // rotate cube faces
-    if (key == GLFW_KEY_T && action == GLFW_PRESS)
-    {
-        cuboRubik->rotateU();
+    if (key == GLFW_KEY_T && action == GLFW_PRESS) {
+        cuboRubik->rotateU(isClockwise);
     }
-    if (key == GLFW_KEY_R && action == GLFW_PRESS)
-    {
-        cuboRubik->rotateL(); // clockwise
+    if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+        cuboRubik->rotateL(isClockwise); 
     }
-    if (key == GLFW_KEY_F && action == GLFW_PRESS)
-    {
-        cuboRubik->rotateF(); // clockwise
+    if (key == GLFW_KEY_F && action == GLFW_PRESS) {
+        cuboRubik->rotateF(isClockwise); 
     }
-    if (key == GLFW_KEY_G && action == GLFW_PRESS)
-    {
-        cuboRubik->rotateR(); // clockwise
+    if (key == GLFW_KEY_G && action == GLFW_PRESS) {
+        cuboRubik->rotateR(isClockwise); 
     }
-    if (key == GLFW_KEY_Y && action == GLFW_PRESS)
-    {
-        cuboRubik->rotateB(); // clockwise
+    if (key == GLFW_KEY_Y && action == GLFW_PRESS) {
+        cuboRubik->rotateB(isClockwise); 
     }
-    if (key == GLFW_KEY_H && action == GLFW_PRESS)
-    {
-        cuboRubik->rotateD(); // clockwise
+    if (key == GLFW_KEY_H && action == GLFW_PRESS) {
+        cuboRubik->rotateD(isClockwise); 
     }
+	// rotate cube slices
+	if (key == GLFW_KEY_V && action == GLFW_PRESS)
+	{
+		cuboRubik->rotateSV(isClockwise); // clockwise
+	}
+	if (key == GLFW_KEY_B && action == GLFW_PRESS)
+	{
+		cuboRubik->rotateSH(isClockwise); // clockwise
+	}
+	if (key == GLFW_KEY_N && action == GLFW_PRESS)
+	{
+		cuboRubik->rotateSS(isClockwise); // clockwise
+	}
     // -------------------------------------------------
 
     // (cristian) 2. TRASLACIÓN CONTINUA DEL CUBO

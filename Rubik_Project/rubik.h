@@ -1,8 +1,6 @@
 #ifndef RUBIK_H_
 #define RUBIK_H_
 
-// rubik.h - class to store and manipulate the Rubik's cube
-
 #include "figura.h"
 #include "helper.h"
 #include "camera.h"
@@ -53,6 +51,7 @@ private:
     void rotateFace(char face, float angle);
     void updateCubePositions(const std::vector<string>& affectedCubes, char face, float angle);
     void updateFaceMapAfterRotation(char face, bool clockwise);
+	void updateSliceMapAfterRotation(char face, bool clockwise);
     void updateAdjacentFaces(char face, bool clockwise);
 public:
     CuboRubik(float lastFrameTime, Camera & cam);
@@ -64,12 +63,15 @@ public:
 
     void draw(unsigned int shaderProgram);
 
-    void rotateU();
-    void rotateD();
-    void rotateL();
-    void rotateR();
-    void rotateF();
-    void rotateB();
+    void rotateU(bool clockwise = true);
+    void rotateD(bool clockwise = true);
+    void rotateL(bool clockwise = true);
+    void rotateR(bool clockwise = true);
+    void rotateF(bool clockwise = true);
+    void rotateB(bool clockwise = true);
+	void rotateSV(bool clockwise = true);
+	void rotateSH(bool clockwise = true);
+	void rotateSS(bool clockwise = true);
 
     void applyTransform(matriz4x4 m);
 
@@ -242,8 +244,9 @@ void CuboRubik::rotateFace(char face, float angle) {
     //}
 
     angle = normalizeAngle(angle);
-
+	bool isSlice = 0;
     affectedCubes.clear();
+	
     if (faceMap.find(std::string(1, face)) != faceMap.end()) {
         const auto& faceCubes = faceMap[std::string(1, face)];
         affectedCubes.insert(
@@ -251,12 +254,19 @@ void CuboRubik::rotateFace(char face, float angle) {
             faceCubes.begin(),
             faceCubes.end()
         );
-    }
-    
+    } else if (sliceMap.find(std::string(1, face)) != sliceMap.end()) {
+		const auto& sliceCubes = sliceMap[std::string(1, face)];
+        affectedCubes.insert(
+            affectedCubes.end(),
+            sliceCubes.begin(),
+            sliceCubes.end()
+        );
+		isSlice = 1;
+	}
 
     updateCubePositions(affectedCubes, face, angle);
-    updateFaceMapAfterRotation(face, angle < 0);
-
+	if(isSlice){updateSliceMapAfterRotation(face, angle<0);}
+	else {updateFaceMapAfterRotation(face, angle < 0);}
 }
 
 void CuboRubik::updateCubePositions(const std::vector<std::string>& affectedCubes, char face, float angle) {
@@ -274,15 +284,18 @@ void CuboRubik::updateCubePositions(const std::vector<std::string>& affectedCube
     // Generate the rotation matrix using your custom Transform class
     switch(face) {
         case 'R': 
-        case 'L': 
+        case 'L':
+		case 'V':
             rotation = t.rotacionX(physAngle); 
             break;
         case 'U': 
-        case 'D': 
+        case 'D':
+		case 'H':		
             rotation = t.rotacionY(physAngle); 
             break;
         case 'F': 
-        case 'B': 
+        case 'B':
+		case 'S':
             rotation = t.rotacionZ(physAngle); 
             break;
     }
@@ -330,6 +343,59 @@ void CuboRubik::updateFaceMapAfterRotation(char face, bool clockwise) {
     // Update adjacent faces
     updateAdjacentFaces(face, clockwise);
     printFaceMap(face);
+}
+
+void CuboRubik::updateSliceMapAfterRotation(char slice, bool clockwise) {
+    auto& sliceCubes = sliceMap[string(1, slice)];
+    vector<string> newOrder;
+    
+    // Different rotation patterns based on slice and direction
+    if(slice == 'S'){
+        if (clockwise) {
+        // Clockwise rotation pattern: corners rotate 6->8->2->0->6, edges rotate 7->5->1->3->7
+            newOrder = {sliceCubes[6], sliceCubes[7], sliceCubes[0],
+                        sliceCubes[1],                 sliceCubes[2],
+                        sliceCubes[3], sliceCubes[4], sliceCubes[5]};
+        } else {
+        // Counter-clockwise rotation pattern: corners rotate 6->0->2->8->6, edges rotate 7->3->1->5->7
+            newOrder = {sliceCubes[2], sliceCubes[3], sliceCubes[4],
+                        sliceCubes[5],                 sliceCubes[6], 
+                        sliceCubes[7], sliceCubes[0], sliceCubes[1]};
+        }
+    }
+        else if(slice == 'V' || slice == 'H'){
+        if (clockwise) {
+        // Clockwise rotation pattern: corners rotate 6->8->2->0->6, edges rotate 7->5->1->3->7
+            newOrder = {sliceCubes[2], sliceCubes[3], sliceCubes[4],
+                        sliceCubes[5],                sliceCubes[6],
+                        sliceCubes[7], sliceCubes[0], sliceCubes[1]};
+        } else {
+        // Counter-clockwise rotation pattern: corners rotate 6->0->2->8->6, edges rotate 7->3->1->5->7
+            newOrder = {sliceCubes[6], sliceCubes[7], sliceCubes[0],
+                        sliceCubes[1],                sliceCubes[2], 
+                        sliceCubes[3], sliceCubes[4], sliceCubes[5]};
+        }
+    }
+    
+    
+    // check if there are no duplicates in a slice
+    for (size_t i = 0; i < newOrder.size(); i++) {
+        for (size_t j = i + 1; j < newOrder.size(); j++) {
+            if (newOrder[i] == newOrder[j]) {
+                std::cerr << "\t Error: duplicate cube in slice " << slice << std::endl;
+                return;
+            }
+        }
+    }
+    
+    // Update the slice map with new positions
+    sliceCubes = array<string, 8>();
+    for (int i = 0; i < 8; i++) {
+        sliceCubes[i] = newOrder[i];
+    }   
+
+    // Update adjacent faces
+    updateAdjacentFaces(slice, clockwise);
 }
 
 void CuboRubik::updateAdjacentFaces(char face, bool clockwise) {
@@ -768,30 +834,39 @@ void CuboRubik::updateAdjacentFaces(char face, bool clockwise) {
 
 /*------------------------------------------------------------------------------------*/
 
-void CuboRubik::rotateU() {
-    rotateFace('U', -90.0f);
+void CuboRubik::rotateU(bool clockwise) {
+    rotateFace('U', clockwise ? -90.0f : 90.0f);
 }
 
-void CuboRubik::rotateL() {
-    rotateFace('L', -90.0f);
+void CuboRubik::rotateL(bool clockwise) {
+    rotateFace('L', clockwise ? -90.0f : 90.0f);
 }
 
-
-void CuboRubik::rotateF() {
-    rotateFace('F', -90.0f);
+void CuboRubik::rotateF(bool clockwise) {
+    rotateFace('F', clockwise ? -90.0f : 90.0f);
 }
 
-
-void CuboRubik::rotateR() {
-    rotateFace('R', -90.0f);
+void CuboRubik::rotateR(bool clockwise) {
+    rotateFace('R', clockwise ? -90.0f : 90.0f);
 }
 
-void CuboRubik::rotateB() {
-    rotateFace('B', -90.0f);
+void CuboRubik::rotateB(bool clockwise) {
+    rotateFace('B', clockwise ? -90.0f : 90.0f);
 }
 
-void CuboRubik::rotateD() {
-    rotateFace('D', -90.0f);
+void CuboRubik::rotateD(bool clockwise) {
+    rotateFace('D', clockwise ? -90.0f : 90.0f);
+}
+
+void CuboRubik::rotateSV(bool clockwise) {
+    rotateFace('V', clockwise ? -90.0f : 90.0f);
+}
+
+void CuboRubik::rotateSH(bool clockwise) {
+    rotateFace('H', clockwise ? -90.0f : 90.0f);
+}
+void CuboRubik::rotateSS(bool clockwise) {
+    rotateFace('S', clockwise ? -90.0f : 90.0f);
 }
 
 
@@ -848,6 +923,131 @@ void CuboRubik::rotarCuboGlobalX(float angulo) {
 void CuboRubik::rotarCuboGlobalY(float angulo) {
     acumRotY += angulo; // Solo acumulamos el valor
 }
+
+/*
+std::vector<string> scrambleCube(int numMoves) {
+    std::vector<std::string> sequenceString;
+    std::vector<Move> scrambleSequence = generateScrambleSequence(numMoves);
+
+    isExecutingSequence = true;
+    emptyMoveQueue();
+    
+    std::cout << "Desordenando cubo..." << scrambleSequence.size() <<std::endl;
+    for (const Move& move : scrambleSequence) {
+        std::cout << move.face << "(" << move.angle << ") ";
+    
+        // if (move.isSlice) {
+        //     rotateSlice(move.face, move.angle);
+        // } else {
+        //     rotateFace(move.face, move.angle);
+        // }
+        //currentAnimation.animationSpeed = 720.0f;
+        if(move.angle < 0)
+        {
+            switch(move.face) {
+                case 'U':
+                    queueRotation('U', -90.0f);
+                    sequenceString.push_back("U");
+                    //rotateU();
+                    //sequenceString.push_back("U");
+                    break;
+                case 'L':
+                    queueRotation('L', -90.0f);
+                    sequenceString.push_back("L");
+                    //rotateL();
+                    //sequenceString.push_back("L");
+                    break;
+                case 'F':
+                    queueRotation('F', -90.0f);
+                    sequenceString.push_back("F");
+                    //rotateF();
+                    //sequenceString.push_back("F");
+                    break;
+                case 'R':
+                    queueRotation('R', -90.0f);
+                    sequenceString.push_back("R");
+                    //rotateR();
+                    //sequenceString.push_back("R");
+                    break;
+                case 'B':
+                    queueRotation('B', -90.0f);
+                    sequenceString.push_back("B");
+                    //rotateB();
+                    //sequenceString.push_back("B");
+                    break;
+                case 'D':
+                    queueRotation('D', -90.0f);
+                    sequenceString.push_back("D");
+                    //rotateD();
+                    //sequenceString.push_back("D");
+                    break;
+                case 'V':
+                    rotateSV();
+                    break;
+                case 'H':
+                    rotateSH();
+                    break;
+                case 'S':
+                    rotateSS();
+                    break;
+            }
+        }
+        else{
+            switch(move.face) {
+                case 'U':
+                    queueRotation('U', 90.0f);
+                    sequenceString.push_back("U'");	
+                    //rotateUPrime();
+                    //sequenceString.push_back("U'");
+                    break;
+                case 'L':
+                    queueRotation('L', 90.0f);
+                    sequenceString.push_back("L'");
+                    //rotateLPrime();
+                    //sequenceString.push_back("L'");
+                    break;
+                case 'F':
+                    queueRotation('F', 90.0f);
+                    sequenceString.push_back("F'");
+                    //rotateFPrime();
+                    //sequenceString.push_back("F'");
+                    break;
+                case 'R':
+                    queueRotation('R', 90.0f);
+                    sequenceString.push_back("R'");
+                    //rotateRPrime();
+                    //sequenceString.push_back("R'");
+                    break;
+                case 'B':
+                    queueRotation('B', 90.0f);
+                    sequenceString.push_back("B'");
+                    //rotateBPrime();
+                    //sequenceString.push_back("B'");
+                    break;
+                case 'D':
+                    queueRotation('D', 90.0f);
+                    sequenceString.push_back("D'");
+                    //rotateDPrime();
+                    //sequenceString.push_back("D'");
+                    break;
+                case 'V':
+                    rotateSV();
+                    break;
+                case 'H':
+                    rotateSH();
+                    break;
+                case 'S':
+                    rotateSS();
+                    break;
+            }
+        }
+        
+    }
+    //std::cout << "queue size: "<< moveQueue.size() << std::endl;
+    std::cout << std::endl;
+    return sequenceString;
+}
+*/
 
 CuboRubik::~CuboRubik() {
     /*
