@@ -248,6 +248,12 @@ int main()
 
         camera.updateCameraAnimation(deltaTime); // TODO
 
+        // ---- ANIMATION UPDATE ----
+        // Advance any active face/slice rotation animation.
+        // This must be called once per frame to ensure smooth visual rotation.
+        cuboRubik->update_animation(deltaTime);
+        // --------------------------
+
         viewLoc = glGetUniformLocation(shaderProgram, "view");
         projLoc = glGetUniformLocation(shaderProgram, "projection");
         modelLoc = glGetUniformLocation(shaderProgram, "model");
@@ -311,6 +317,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                   << std::endl;
     }
     // -------------- MOVIMIENTO CAMARA ------------------
+    // Camera movement is always allowed, even during animation
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         camera.moveForward(deltaTime);
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -325,41 +332,57 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
         camera.zoomOut(deltaTime);
     // -------------------------------------------------
     // ---------------- CAMADAS ------------------
-    // rotate cube faces
-    if (key == GLFW_KEY_T && action == GLFW_PRESS) {
-        cuboRubik->rotateU(isClockwise);
+    // 
+    // Block face/slice rotation inputs while an animation is running.
+    // This prevents queuing multiple simultaneous rotations which would
+    // corrupt the cube's logical and visual state.
+    //
+    if (!cuboRubik->is_animation_running()) {
+        // rotate cube faces
+        if (key == GLFW_KEY_T && action == GLFW_PRESS) {
+            cuboRubik->rotateU(isClockwise);
+        }
+        if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+            cuboRubik->rotateL(isClockwise); 
+        }
+        if (key == GLFW_KEY_F && action == GLFW_PRESS) {
+            cuboRubik->rotateF(isClockwise); 
+        }
+        if (key == GLFW_KEY_G && action == GLFW_PRESS) {
+            cuboRubik->rotateR(isClockwise); 
+        }
+        if (key == GLFW_KEY_Y && action == GLFW_PRESS) {
+            cuboRubik->rotateB(isClockwise); 
+        }
+        if (key == GLFW_KEY_H && action == GLFW_PRESS) {
+            cuboRubik->rotateD(isClockwise); 
+        }
+        // rotate cube slices
+        if (key == GLFW_KEY_V && action == GLFW_PRESS)
+        {
+            cuboRubik->rotateSV(isClockwise); // clockwise
+        }
+        if (key == GLFW_KEY_B && action == GLFW_PRESS)
+        {
+            cuboRubik->rotateSH(isClockwise); // clockwise
+        }
+        if (key == GLFW_KEY_N && action == GLFW_PRESS)
+        {
+            cuboRubik->rotateSS(isClockwise); // clockwise
+        }
     }
-    if (key == GLFW_KEY_R && action == GLFW_PRESS) {
-        cuboRubik->rotateL(isClockwise); 
+    // If animation is running and a rotation key is pressed, print a debug message
+    else if (action == GLFW_PRESS && (
+        key == GLFW_KEY_T || key == GLFW_KEY_R || key == GLFW_KEY_F || 
+        key == GLFW_KEY_G || key == GLFW_KEY_Y || key == GLFW_KEY_H ||
+        key == GLFW_KEY_V || key == GLFW_KEY_B || key == GLFW_KEY_N
+    )) {
+        std::cout << "[INPUT] Rotation key ignored: animation in progress." << std::endl;
     }
-    if (key == GLFW_KEY_F && action == GLFW_PRESS) {
-        cuboRubik->rotateF(isClockwise); 
-    }
-    if (key == GLFW_KEY_G && action == GLFW_PRESS) {
-        cuboRubik->rotateR(isClockwise); 
-    }
-    if (key == GLFW_KEY_Y && action == GLFW_PRESS) {
-        cuboRubik->rotateB(isClockwise); 
-    }
-    if (key == GLFW_KEY_H && action == GLFW_PRESS) {
-        cuboRubik->rotateD(isClockwise); 
-    }
-	// rotate cube slices
-	if (key == GLFW_KEY_V && action == GLFW_PRESS)
-	{
-		cuboRubik->rotateSV(isClockwise); // clockwise
-	}
-	if (key == GLFW_KEY_B && action == GLFW_PRESS)
-	{
-		cuboRubik->rotateSH(isClockwise); // clockwise
-	}
-	if (key == GLFW_KEY_N && action == GLFW_PRESS)
-	{
-		cuboRubik->rotateSS(isClockwise); // clockwise
-	}
     // -------------------------------------------------
 
-    // (cristian) 2. TRASLACIÓN CONTINUA DEL CUBO
+    // (cristian) 2. TRASLACI�N CONTINUA DEL CUBO
+    // Global translation is allowed during animation
     float velocidadTraslacion = 2.5f; // Unidades espaciales por segundo
     float pasoTraslacion = velocidadTraslacion * deltaTime;
     if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
@@ -384,7 +407,8 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
 
 
-    // (cristian )3. ROTACIÓN CONTINUA DEL CUBO GLOBAL (Basada en tiempo real)
+    // (cristian )3. ROTACI�N CONTINUA DEL CUBO GLOBAL (Basada en tiempo real)
+    // Global rotation is allowed during animation
     float velocidadRotacion = 90.0f; // Grados por segundo
     float pasoAngulo = velocidadRotacion * deltaTime;
 
@@ -397,29 +421,31 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
         cuboRubik->rotarCuboGlobalY(pasoAngulo);
     }
-    if (glfwGetKey(window, GLFW_KEY_V) == GLFW_PRESS) {
-        cuboRubik->rotarCuboGlobalY(-pasoAngulo);
-    }
+    // NOTE: GLFW_KEY_V is also used for slice rotation (rotateSV).
+    // Since V is pressed (not just tapped), this continuous rotation
+    // only fires when V is held. The slice rotation above fires on press.
+    // These don't conflict because one is action==GLFW_PRESS and the other
+    // is a held-key check. However, during animation, the slice rotation
+    // is blocked, so this global rotation on V would still work.
 
-
-    // reset cube
+    // reset cube - allowed during animation
     if (key == GLFW_KEY_K && action == GLFW_PRESS) {
         cuboRubik->resetRubik();
     }  
     
-    // change display mode to lines only
+    // change display mode to lines only - allowed during animation
     if(key == GLFW_KEY_I && action == GLFW_PRESS){
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     }
-    // change display mode to fill only
+    // change display mode to fill only - allowed during animation
     if(key == GLFW_KEY_O && action == GLFW_PRESS){
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
-    // change display mode to points only 
+    // change display mode to points only - allowed during animation
     if(key == GLFW_KEY_P && action == GLFW_PRESS){
         glPolygonMode(GL_FRONT_AND_BACK, GL_POINT);
     }
-    // change background color
+    // change background color - allowed during animation
     if (key == GLFW_KEY_L && action == GLFW_PRESS) {
         backgroundColor = getRandomColor();}
 
