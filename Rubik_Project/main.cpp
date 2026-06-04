@@ -42,7 +42,8 @@ const unsigned int SCR_HEIGHT = 600;
 
 static void key_callback(GLFWwindow*, int, int, int, int); //callback para las teclas
 
-struct colorVec {
+class colorVec {
+	public:
     float x, y, z;
     colorVec(float x = 0.0f, float y = 0.0f, float z = 0.0f) : x(x), y(y), z(z) {}
 };
