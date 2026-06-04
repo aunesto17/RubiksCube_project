@@ -64,7 +64,8 @@ private:
      * from saved starting snapshots and applies the total rotation for the current
      * progress. On the final frame, we apply the exact target angle mathematically.
      */
-    struct Face_Rotation_Animation {
+    class Face_Rotation_Animation {
+		public:
         bool is_running = false;           // Whether an animation is currently active
         char face = '\0';                  // Which face/slice is rotating (e.g., 'U', 'L', 'V')
         std::vector<std::string> affected_cube_names;  // Names of cubes being rotated
