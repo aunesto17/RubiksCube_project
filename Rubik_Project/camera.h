@@ -15,7 +15,8 @@ private:
         ZOOM_IN
     };
 
-    struct CameraAnimation {
+    class CameraAnimation {
+        public:        
         bool isAnimating = false;
         CameraAnimState state = CameraAnimState::NONE;
         float startYaw = 45.0f;
