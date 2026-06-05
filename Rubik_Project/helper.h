@@ -10,8 +10,8 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "stb_image.h"	// libreria para cargar imagenes
-//#include "solver/solve.h"
-//#include "solver/random.h"
+#include "solver/solve.h"
+#include "solver/random.h"
 #include "vertex.h"
 #include "matriz.h"
 #include "transform.h"

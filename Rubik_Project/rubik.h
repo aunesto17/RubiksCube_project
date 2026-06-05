@@ -29,41 +29,20 @@ private:
     map<string, array<string, 8>>   sliceMap;
 
     Camera * camera;
-
-    // cristian
+    // movimiento global del cubo
 	float acumTx = 0.0f, acumTy = 0.0f, acumTz = 0.0f;
 	float acumRotX = 0.0f, acumRotY = 0.0f;
 
     float lastFrameTime;
-    // rotation affected cubes
 
     void initializeCubes();
-    // Helper method to initialize cube buffers
-    void setupBuffers();
-    // Helper method to update cube buffer data
-    void updateCubeBuffer(const std::string& cubeName);
-    
-    /**
-     * FACE AND SLICE ROTATION ANIMATION
-     */
-    // rotation affected cubes
-    std::vector<std::string> affectedCubes;
+
+    // FACE AND SLICE ROTATION ANIMATION
     void rotateFace(char face, float angle);
-    void updateCubePositions(const std::vector<string>& affectedCubes, char face, float angle);
     void updateFaceMapAfterRotation(char face, bool clockwise);
 	void updateSliceMapAfterRotation(char face, bool clockwise);
     void updateAdjacentFaces(char face, bool clockwise);
 
-    // ---- Animation System (Smooth Rotation) ----
-    /**
-     * Holds the complete state for an in-progress face or slice rotation animation.
-     * Instead of applying the full rotation instantly, we animate it over multiple
-     * frames by interpolating the angle from 0 to target_angle.
-     * 
-     * To avoid floating-point drift, each frame restores the affected cubes' vertices
-     * from saved starting snapshots and applies the total rotation for the current
-     * progress. On the final frame, we apply the exact target angle mathematically.
-     */
     class Face_Rotation_Animation {
 		public:
         bool is_running = false;           // Whether an animation is currently active
@@ -78,109 +57,25 @@ private:
     };
     Face_Rotation_Animation current_animation;
 
-    /**
-     * Computes the rotation matrix for a given face/slice and angle.
-     * Uses the same convention as updateCubePositions to ensure consistency.
-     * 
-     * For faces on the negative side of their axis (L, D, B), we invert the angle
-     * so the physical matrix rotation matches the logical clockwise/counter-clockwise
-     * direction.
-     */
-    matriz4x4 compute_rotation_matrix_for_face(char face, float angle) {
-        Transform t;
-        float phys_angle = angle;
-        // Faces on the negative side of their axis need angle inversion
-        // to match the logical clockwise/counter-clockwise mapping.
-        if (face == 'L' || face == 'D' || face == 'B') {
-            phys_angle = -angle; 
-        }
-        switch(face) {
-            case 'R': 
-            case 'L':
-			case 'V':
-                return t.rotacionX(phys_angle);
-            case 'U': 
-            case 'D':
-			case 'H':		
-                return t.rotacionY(phys_angle);
-            case 'F': 
-            case 'B':
-			case 'S':
-                return t.rotacionZ(phys_angle);
-        }
-        // This should never happen if face is valid.
-        std::cerr << "[ERROR][compute_rotation_matrix_for_face] Unknown face '" 
-                  << face << "', returning identity matrix." << std::endl;
-        return t.rotacionY(0.0f);  // Identity (no rotation)
-    }
+    // Sequence execution (scramble/solve automation)
+    struct QueuedMove {
+        char face;
+        float angle;
+    };
+    std::deque<QueuedMove> moveQueue;
+    bool isExecutingSequence = false;
+    float sequenceSpeedMultiplier = 1.0f;
 
-    /**
-     * Applies a rotation of the given angle to all affected cubes in the
-     * current animation, restoring from saved starting vertices first.
-     * 
-     * This is the core of the drift-free approach: we always rotate from the
-     * original snapshot, never from the previous frame's result.
-     */
-    void apply_rotation_to_affected_cubes(float angle) {
-        matriz4x4 rotation = compute_rotation_matrix_for_face(current_animation.face, angle);
-        
-        for (size_t i = 0; i < current_animation.affected_cube_names.size(); i++) {
-            const std::string& cube_name = current_animation.affected_cube_names[i];
-            auto it = cubeMap.find(cube_name);
-            if (it == cubeMap.end() || !it->second) {
-                std::cerr << "[WARNING][apply_rotation_to_affected_cubes] Cube '" 
-                          << cube_name << "' not found or is null, skipping." << std::endl;
-                continue;
-            }
-            
-            // 1. Restore vertices from the saved snapshot (drift-free)
-            it->second->vertices = current_animation.affected_cubes_starting_vertices[i];
-            
-            // 2. Apply the rotation matrix to the restored vertices
-            it->second->vertices = rotation.multFig(it->second->vertices);
-            
-            // 3. Push updated vertices to the GPU
-            it->second->updateBuffers();
-        }
-    }
+    char colorToChar(const vec3& c) const;
 
-    /**
-     * Finalizes the animation by applying the exact target rotation and
-     * updating the logical face/slice maps. This ensures the mathematical
-     * precision of the final state (no floating-point accumulation errors).
-     */
-    void finalize_animation() {
-        if (!current_animation.is_running) {
-            std::cerr << "[WARNING][finalize_animation] Called but no animation is running." << std::endl;
-            return;
-        }
+    matriz4x4 compute_rotation_matrix_for_face(char face, float angle);
 
-        std::cout << "[ANIMATION] Finalizing rotation of face '" << current_animation.face 
-                  << "' to exact angle " << current_animation.target_angle << " degrees." << std::endl;
-
-        // Apply the mathematically exact final rotation from saved starting vertices
-        apply_rotation_to_affected_cubes(current_animation.target_angle);
-
-        // Now update the logical maps to reflect the completed rotation
-        if (current_animation.is_slice_rotation) {
-            updateSliceMapAfterRotation(current_animation.face, current_animation.is_clockwise);
-        } else {
-            updateFaceMapAfterRotation(current_animation.face, current_animation.is_clockwise);
-        }
-
-        // Clear animation state
-        current_animation.is_running = false;
-        current_animation.affected_cube_names.clear();
-        current_animation.affected_cubes_starting_vertices.clear();
-        
-        std::cout << "[ANIMATION] Rotation complete. Ready for next input." << std::endl;
-    }
+    void apply_rotation_to_affected_cubes(float angle);
+    void finalize_animation();
 
 public:
     CuboRubik(float lastFrameTime, Camera & cam);
-    void init(){
-        initializeCubes();
-    }
+    void init();
 
     void resetRubik();
 
@@ -202,6 +97,7 @@ public:
     void printFaceMap(char face);
     // Helper method to debug slice maps
     void printSliceMap(char slice);
+    void printMenu() const;
 
     // cristian
     void irAlOrigen();
@@ -213,58 +109,28 @@ public:
 	void rotarCuboGlobalY(float angulo);
 
     // ---- Animation System Public Interface ----
-    /**
-     * Advances the face/slice rotation animation by delta_time seconds.
-     * Call this once per frame from the main render loop.
-     * 
-     * The animation works by:
-     * 1. Restoring affected cubes' vertices from a saved snapshot each frame
-     * 2. Applying the total rotation for the current progress (0% to 100%)
-     * 3. On the final frame, applying the exact mathematically-correct angle
-     *    and updating the logical face/slice maps.
-     */
-    void update_animation(float delta_time) {
-        if (!current_animation.is_running) {
-            return;  // Nothing to animate
-        }
+    void update_animation(float delta_time);
 
-        // Guard against invalid duration to prevent division by zero
-        if (current_animation.duration_seconds <= 0.0f) {
-            std::cerr << "[ERROR][update_animation] Invalid duration (" 
-                      << current_animation.duration_seconds 
-                      << "s), forcing immediate completion." << std::endl;
-            finalize_animation();
-            return;
-        }
-
-        // Advance time
-        current_animation.elapsed_time += delta_time;
-        
-        // Calculate progress as a value from 0.0 to 1.0
-        float progress = current_animation.elapsed_time / current_animation.duration_seconds;
-        
-        // Check if animation has reached or exceeded its target duration
-        if (progress >= 1.0f) {
-            // Final frame: snap to the exact mathematically-correct final position
-            finalize_animation();
-            return;
-        }
-
-        // Interpolate the angle for this frame based on progress
-        // Example: if target is -90 and progress is 0.5, current angle is -45
-        float current_angle = current_animation.target_angle * progress;
-        
-        // Apply rotation from saved starting vertices (drift-free)
-        apply_rotation_to_affected_cubes(current_angle);
-    }
-
-    /**
-     * Returns true if a face/slice rotation animation is currently in progress.
-     * Use this to block new rotation inputs during animation.
-     */
     bool is_animation_running() const {
         return current_animation.is_running;
     }
+
+    bool isSequenceRunning() const {
+        return isExecutingSequence;
+    }
+
+    void setSequenceSpeed(float s);
+
+    float getSequenceSpeed() const {
+        return sequenceSpeedMultiplier;
+    }
+
+    void cancelSequence();
+
+    std::string getFaceletString();
+
+    void scrambleRubik(int numMoves);
+    void solveRubik();
 
     ~CuboRubik();
 };
@@ -407,8 +273,10 @@ void CuboRubik::draw(unsigned int shaderProgram) {
 CuboRubik::CuboRubik(float lastFrameTime, Camera & cam) : lastFrameTime(lastFrameTime) {
     std::cout << "Rubik's Cube Constructor" << std::endl;
     camera = &cam;
-    //initializeCubes();    
-    //setupBuffers();
+}
+
+void CuboRubik::init() {
+    initializeCubes();
 }
 
 /*------------------------------------------------------------------------------------*/
@@ -478,46 +346,136 @@ void CuboRubik::rotateFace(char face, float angle) {
               << ", duration=" << current_animation.duration_seconds << "s" << std::endl;
 }
 
-void CuboRubik::updateCubePositions(const std::vector<string>& affectedCubes, char face, float angle) {
-    // NOTE: This method is kept for compatibility but is no longer used directly.
-    // The animation system in update_animation() and apply_rotation_to_affected_cubes()
-    // replaces its functionality with a drift-free approach.
-    
+matriz4x4 CuboRubik::compute_rotation_matrix_for_face(char face, float angle) {
     Transform t;
-    matriz4x4 rotation;
-    
-    // Fix the Desync: L, D, and B faces sit on the negative side of their axes.
-    // We invert the angle so the physical matrix rotation perfectly matches 
-    // the clockwise/counter-clockwise logical array mapping.
-    float physAngle = angle;
+    float phys_angle = angle;
     if (face == 'L' || face == 'D' || face == 'B') {
-        physAngle = -angle; 
+        phys_angle = -angle; 
     }
-
-    // Generate the rotation matrix using your custom Transform class
     switch(face) {
         case 'R': 
         case 'L':
-		case 'V':
-            rotation = t.rotacionX(physAngle); 
-            break;
+        case 'V':
+            return t.rotacionX(phys_angle);
         case 'U': 
         case 'D':
-		case 'H':		
-            rotation = t.rotacionY(physAngle); 
-            break;
+        case 'H':		
+            return t.rotacionY(phys_angle);
         case 'F': 
         case 'B':
-		case 'S':
-            rotation = t.rotacionZ(physAngle); 
-            break;
+        case 'S':
+            return t.rotacionZ(phys_angle);
     }
+    std::cerr << "[ERROR][compute_rotation_matrix_for_face] Unknown face '" 
+              << face << "', returning identity matrix." << std::endl;
+    return t.rotacionY(0.0f);
+}
+
+void CuboRubik::apply_rotation_to_affected_cubes(float angle) {
+    matriz4x4 rotation = compute_rotation_matrix_for_face(current_animation.face, angle);
     
-    // Apply transformations
-    for (const std::string& cubeName : affectedCubes) {
-        auto& cube = cubeMap[cubeName];
-        cube->applyTransform(rotation); // Applies transformation and pushes to GPU safely
+    for (size_t i = 0; i < current_animation.affected_cube_names.size(); i++) {
+        const std::string& cube_name = current_animation.affected_cube_names[i];
+        auto it = cubeMap.find(cube_name);
+        if (it == cubeMap.end() || !it->second) {
+            std::cerr << "[WARNING][apply_rotation_to_affected_cubes] Cube '" 
+                      << cube_name << "' not found or is null, skipping." << std::endl;
+            continue;
+        }
+        
+        it->second->vertices = current_animation.affected_cubes_starting_vertices[i];
+        it->second->vertices = rotation.multFig(it->second->vertices);
+        it->second->updateBuffers();
     }
+}
+
+void CuboRubik::finalize_animation() {
+    if (!current_animation.is_running) {
+        std::cerr << "[WARNING][finalize_animation] Called but no animation is running." << std::endl;
+        return;
+    }
+
+    std::cout << "[ANIMATION] Finalizing rotation of face '" << current_animation.face 
+              << "' to exact angle " << current_animation.target_angle << " degrees." << std::endl;
+
+    apply_rotation_to_affected_cubes(current_animation.target_angle);
+
+    if (current_animation.is_slice_rotation) {
+        updateSliceMapAfterRotation(current_animation.face, current_animation.is_clockwise);
+    } else {
+        updateFaceMapAfterRotation(current_animation.face, current_animation.is_clockwise);
+    }
+
+    current_animation.is_running = false;
+    current_animation.affected_cube_names.clear();
+    current_animation.affected_cubes_starting_vertices.clear();
+    
+    std::cout << "[ANIMATION] Rotation complete. Ready for next input." << std::endl;
+}
+
+void CuboRubik::update_animation(float delta_time) {
+    if (!current_animation.is_running) {
+        if (isExecutingSequence && !moveQueue.empty()) {
+            QueuedMove next = moveQueue.front();
+            moveQueue.pop_front();
+            rotateFace(next.face, next.angle);
+            current_animation.duration_seconds = 0.25f / sequenceSpeedMultiplier;
+        }
+        return;
+    }
+
+    if (current_animation.duration_seconds <= 0.0f) {
+        std::cerr << "[ERROR][update_animation] Invalid duration (" 
+                  << current_animation.duration_seconds 
+                  << "s), forcing immediate completion." << std::endl;
+        finalize_animation();
+        if (isExecutingSequence && !moveQueue.empty()) {
+            QueuedMove next = moveQueue.front();
+            moveQueue.pop_front();
+            rotateFace(next.face, next.angle);
+            current_animation.duration_seconds = 0.25f / sequenceSpeedMultiplier;
+        } else if (isExecutingSequence) {
+            isExecutingSequence = false;
+            std::cout << "[SEQUENCE] Complete." << std::endl;
+            printMenu();
+        }
+        return;
+    }
+
+    current_animation.elapsed_time += delta_time;
+    
+    float progress = current_animation.elapsed_time / current_animation.duration_seconds;
+    
+    if (progress >= 1.0f) {
+        finalize_animation();
+        if (isExecutingSequence && !moveQueue.empty()) {
+            QueuedMove next = moveQueue.front();
+            moveQueue.pop_front();
+            rotateFace(next.face, next.angle);
+            current_animation.duration_seconds = 0.25f / sequenceSpeedMultiplier;
+        } else if (isExecutingSequence) {
+            isExecutingSequence = false;
+            std::cout << "[SEQUENCE] Complete." << std::endl;
+            printMenu();
+        }
+        return;
+    }
+
+    float current_angle = current_animation.target_angle * progress;
+    apply_rotation_to_affected_cubes(current_angle);
+}
+
+void CuboRubik::setSequenceSpeed(float s) {
+    if (s < 0.1f) s = 0.1f;
+    sequenceSpeedMultiplier = s;
+    std::cout << "[SEQUENCE] Speed set to " << s << "x ("
+              << (0.25f / s) << "s per move)" << std::endl;
+}
+
+void CuboRubik::cancelSequence() {
+    moveQueue.clear();
+    isExecutingSequence = false;
+    std::cout << "[SEQUENCE] Cancelled. Current animation will finish naturally." << std::endl;
 }
 
 void CuboRubik::updateFaceMapAfterRotation(char face, bool clockwise) {
@@ -555,7 +513,7 @@ void CuboRubik::updateFaceMapAfterRotation(char face, bool clockwise) {
 
     // Update adjacent faces
     updateAdjacentFaces(face, clockwise);
-    printFaceMap(face);
+    //printFaceMap(face); // for testing
 }
 
 void CuboRubik::updateSliceMapAfterRotation(char slice, bool clockwise) {
@@ -1099,12 +1057,8 @@ void CuboRubik::resetRubik() {
     faceMap.clear();
     // empty sliceMap
     sliceMap.clear();
-    // empty cubeBuffers
-    //cubeBuffers.clear();
     // initialize cubes
     initializeCubes();
-    // setup buffers
-    //setupBuffers();
     std::cout << "Rubik's Cube Restored." << std::endl;
 }
 
@@ -1124,6 +1078,42 @@ void CuboRubik::printSliceMap(char slice) {
         std::cout << sliceCubes[i] << " ";
     }
     std::cout << std::endl;
+}
+
+void CuboRubik::printMenu() const {
+    std::cout << "\n=========================================" << std::endl;
+    std::cout << "  MENU - CUBO RUBIK - CONTROL DE TECLAS" << std::endl;
+    std::cout << "=========================================" << std::endl;
+    std::cout << "ESC       Cerrar ventana" << std::endl;
+    std::cout << "TAB       Cambiar direccion de rotacion" << std::endl;
+    std::cout << "W/S/A/D   Movimiento de camara" << std::endl;
+    std::cout << "Q / E     Zoom in / zoom out" << std::endl;
+    std::cout << "--- ROTACION DE CAMADAS ---" << std::endl;
+    std::cout << "T         Rotar cara U (Arriba / Blanca)" << std::endl;
+    std::cout << "R         Rotar cara L (Izquierda / Verde)" << std::endl;
+    std::cout << "F         Rotar cara F (Frontal / Roja)" << std::endl;
+    std::cout << "G         Rotar cara R (Derecha / Azul)" << std::endl;
+    std::cout << "Y         Rotar cara B (Trasera / Naranja)" << std::endl;
+    std::cout << "H         Rotar cara D (Abajo / Amarilla)" << std::endl;
+    std::cout << "--- Slices ---" << std::endl;
+    std::cout << "V         Rotar slice vertical (V)" << std::endl;
+    std::cout << "B         Rotar slice horizontal (H)" << std::endl;
+    std::cout << "N         Rotar slice S (Medio)" << std::endl;
+    std::cout << "--- Movimientos Globales ---" << std::endl;
+    std::cout << "Flechas   Trasladar cubo" << std::endl;
+    std::cout << "Z / X     Rotar cubo global eje X" << std::endl;
+    std::cout << "C         Rotar cubo global eje Y" << std::endl;
+    std::cout << "--- Acciones ---" << std::endl;
+    std::cout << "J         Resolver cubo" << std::endl;
+    std::cout << "M         Desordenar cubo (50 movs)" << std::endl;
+    std::cout << "K         Reiniciar cubo (restaurar)" << std::endl;
+    std::cout << "L         Color de fondo aleatorio" << std::endl;
+    std::cout << "--- Velocidad ---" << std::endl;
+    std::cout << "1 - 5     Velocidad: x1, x2, x4, x8, x16" << std::endl;
+    std::cout << "= / -     Aumentar / disminuir velocidad" << std::endl;
+    std::cout << "--- Menu ---" << std::endl;
+    std::cout << "P         Mostrar este menu" << std::endl;
+    std::cout << "=========================================\n" << std::endl;
 }
 
 // temp function to transform cube
@@ -1146,140 +1136,204 @@ void CuboRubik::rotarCuboGlobalY(float angulo) {
     acumRotY += angulo; // Solo acumulamos el valor
 }
 
-/*
-std::vector<string> scrambleCube(int numMoves) {
-    std::vector<std::string> sequenceString;
-    std::vector<Move> scrambleSequence = generateScrambleSequence(numMoves);
+/*------------------------------------------------------------------------------------*/
+/*----------------------- FACE COLOR TO CHAR MAPPING -----------------------------*/
+/*------------------------------------------------------------------------------------*/
+
+char CuboRubik::colorToChar(const vec3& c) const {
+    const vec3 targetColors[] = {
+        vec3(1.0f, 1.0f, 1.0f),                                    // U (white)
+        vec3(0.0f, 155.0f/255.0f, 72.0f/255.0f),                   // L (green)
+        vec3(183.0f/255.0f, 18.0f/255.0f, 52.0f/255.0f),           // F (red)
+        vec3(0.0f, 70.0f/255.0f, 173.0f/255.0f),                   // R (blue)
+        vec3(1.0f, 88.0f/255.0f, 0.0f),                            // B (orange)
+        vec3(1.0f, 213.0f/255.0f, 0.0f)                            // D (yellow)
+    };
+    const char colorChars[] = {'U', 'L', 'F', 'R', 'B', 'D'};
+
+    int best = 0;
+    float bestDist = 1e10f;
+    for (int i = 0; i < 6; i++) {
+        float dx = c.getX() - targetColors[i].getX();
+        float dy = c.getY() - targetColors[i].getY();
+        float dz = c.getZ() - targetColors[i].getZ();
+        float dist = dx*dx + dy*dy + dz*dz;
+        if (dist < bestDist) { bestDist = dist; best = i; }
+    }
+    return colorChars[best];
+}
+
+/*------------------------------------------------------------------------------------*/
+/*----------------------- FACELET STRING EXTRACTION ------------------------------*/
+/*------------------------------------------------------------------------------------*/
+
+std::string CuboRubik::getFaceletString() {
+    const char faces[] = {'U', 'R', 'F', 'D', 'L', 'B'};
+    const vec3 outwardNormals[] = {
+        vec3(0.0f,  1.0f,  0.0f),  // U
+        vec3(1.0f,  0.0f,  0.0f),  // R
+        vec3(0.0f,  0.0f,  1.0f),  // F
+        vec3(0.0f, -1.0f,  0.0f),  // D
+        vec3(-1.0f, 0.0f,  0.0f),  // L
+        vec3(0.0f,  0.0f, -1.0f)   // B
+    };
+
+    std::string result;
+    result.reserve(54);
+
+    for (int fi = 0; fi < 6; fi++) {
+        char face = faces[fi];
+        vec3 outward = outwardNormals[fi];
+        std::string faceKey(1, face);
+
+        if (faceMap.find(faceKey) == faceMap.end()) {
+            for (int i = 0; i < 9; i++) result.push_back('?');
+            continue;
+        }
+
+        const auto& faceCubes = faceMap[faceKey];
+        for (int i = 0; i < 9; i++) {
+            const std::string& cubeName = faceCubes[i];
+            auto it = cubeMap.find(cubeName);
+            if (it == cubeMap.end() || !it->second) {
+                result.push_back('?');
+                continue;
+            }
+            const auto& cube = it->second;
+
+            int bestFace = -1;
+            float bestDot = -2.0f;
+            for (int f = 0; f < 6; f++) {
+                vec3 v0 = cube->vertices[f * 6 + 0];
+                vec3 v1 = cube->vertices[f * 6 + 1];
+                vec3 v2 = cube->vertices[f * 6 + 3];
+                vec3 e1 = v1 - v0;
+                vec3 e2 = v2 - v0;
+                vec3 normal = helper::crossProduct(e1, e2);
+                float len = helper::length(normal);
+                if (len > 0.0001f) {
+                    normal = normal * (1.0f / len);
+                    float d = helper::dotProduct(normal, outward);
+                    if (d > bestDot) { bestDot = d; bestFace = f; }
+                }
+            }
+
+            if (bestFace >= 0 && bestFace * 6 < (int)cube->vertexColors.size()) {
+                result.push_back(colorToChar(cube->vertexColors[bestFace * 6]));
+            } else {
+                result.push_back('?');
+            }
+        }
+    }
+
+    return result;
+}
+
+/*------------------------------------------------------------------------------------*/
+/*----------------------- SCRAMBLE ---------------------------------------------------*/
+/*------------------------------------------------------------------------------------*/
+
+void CuboRubik::scrambleRubik(int numMoves) {
+    if (current_animation.is_running || isExecutingSequence) {
+        std::cout << "[SCRAMBLE] Cannot start: animation or sequence already running." << std::endl;
+        return;
+    }
+
+    std::vector<std::string> moves = ::scramble(numMoves);
+    moveQueue.clear();
+
+    std::cout << "[SCRAMBLE] Generating " << numMoves << " random moves..." << std::endl;
+
+    for (const std::string& m : moves) {
+        if (m.empty()) continue;
+        char face = m[0];
+        if (face != 'U' && face != 'R' && face != 'F' &&
+            face != 'D' && face != 'L' && face != 'B') continue;
+
+        if (m.size() == 1) {
+            moveQueue.push_back({face, -90.0f});
+        } else if (m.size() >= 2 && m[1] == '\'') {
+            moveQueue.push_back({face, 90.0f});
+        } else if (m.size() >= 2 && m[1] == '2') {
+            moveQueue.push_back({face, -90.0f});
+            moveQueue.push_back({face, -90.0f});
+        }
+    }
+
+    if (moveQueue.empty()) {
+        std::cout << "[SCRAMBLE] No valid moves generated." << std::endl;
+        return;
+    }
 
     isExecutingSequence = true;
-    emptyMoveQueue();
-    
-    std::cout << "Desordenando cubo..." << scrambleSequence.size() <<std::endl;
-    for (const Move& move : scrambleSequence) {
-        std::cout << move.face << "(" << move.angle << ") ";
-    
-        // if (move.isSlice) {
-        //     rotateSlice(move.face, move.angle);
-        // } else {
-        //     rotateFace(move.face, move.angle);
-        // }
-        //currentAnimation.animationSpeed = 720.0f;
-        if(move.angle < 0)
-        {
-            switch(move.face) {
-                case 'U':
-                    queueRotation('U', -90.0f);
-                    sequenceString.push_back("U");
-                    //rotateU();
-                    //sequenceString.push_back("U");
-                    break;
-                case 'L':
-                    queueRotation('L', -90.0f);
-                    sequenceString.push_back("L");
-                    //rotateL();
-                    //sequenceString.push_back("L");
-                    break;
-                case 'F':
-                    queueRotation('F', -90.0f);
-                    sequenceString.push_back("F");
-                    //rotateF();
-                    //sequenceString.push_back("F");
-                    break;
-                case 'R':
-                    queueRotation('R', -90.0f);
-                    sequenceString.push_back("R");
-                    //rotateR();
-                    //sequenceString.push_back("R");
-                    break;
-                case 'B':
-                    queueRotation('B', -90.0f);
-                    sequenceString.push_back("B");
-                    //rotateB();
-                    //sequenceString.push_back("B");
-                    break;
-                case 'D':
-                    queueRotation('D', -90.0f);
-                    sequenceString.push_back("D");
-                    //rotateD();
-                    //sequenceString.push_back("D");
-                    break;
-                case 'V':
-                    rotateSV();
-                    break;
-                case 'H':
-                    rotateSH();
-                    break;
-                case 'S':
-                    rotateSS();
-                    break;
-            }
-        }
-        else{
-            switch(move.face) {
-                case 'U':
-                    queueRotation('U', 90.0f);
-                    sequenceString.push_back("U'");	
-                    //rotateUPrime();
-                    //sequenceString.push_back("U'");
-                    break;
-                case 'L':
-                    queueRotation('L', 90.0f);
-                    sequenceString.push_back("L'");
-                    //rotateLPrime();
-                    //sequenceString.push_back("L'");
-                    break;
-                case 'F':
-                    queueRotation('F', 90.0f);
-                    sequenceString.push_back("F'");
-                    //rotateFPrime();
-                    //sequenceString.push_back("F'");
-                    break;
-                case 'R':
-                    queueRotation('R', 90.0f);
-                    sequenceString.push_back("R'");
-                    //rotateRPrime();
-                    //sequenceString.push_back("R'");
-                    break;
-                case 'B':
-                    queueRotation('B', 90.0f);
-                    sequenceString.push_back("B'");
-                    //rotateBPrime();
-                    //sequenceString.push_back("B'");
-                    break;
-                case 'D':
-                    queueRotation('D', 90.0f);
-                    sequenceString.push_back("D'");
-                    //rotateDPrime();
-                    //sequenceString.push_back("D'");
-                    break;
-                case 'V':
-                    rotateSV();
-                    break;
-                case 'H':
-                    rotateSH();
-                    break;
-                case 'S':
-                    rotateSS();
-                    break;
-            }
-        }
-        
-    }
-    //std::cout << "queue size: "<< moveQueue.size() << std::endl;
-    std::cout << std::endl;
-    return sequenceString;
+    sequenceSpeedMultiplier = 4.0f;
+    std::cout << "[SCRAMBLE] " << moveQueue.size() << " moves queued at "
+              << sequenceSpeedMultiplier << "x speed." << std::endl;
 }
-*/
+
+/*------------------------------------------------------------------------------------*/
+/*----------------------- SOLVER -----------------------------------------------------*/
+/*------------------------------------------------------------------------------------*/
+
+void CuboRubik::solveRubik() {
+    if (current_animation.is_running || isExecutingSequence) {
+        std::cout << "[SOLVER] Cannot start: animation or sequence already running." << std::endl;
+        return;
+    }
+
+    std::string state = getFaceletString();
+    std::cout << "[SOLVER] Facelet string: " << state << std::endl;
+
+    if (state.find('?') != std::string::npos) {
+        std::cerr << "[SOLVER] Error: facelet string contains unknown colors ('?'). "
+                  << "Aborting solve." << std::endl;
+        return;
+    }
+
+    std::vector<std::string> solution = get_solution(state);
+
+    if (solution.empty() || (solution.size() <= 2 && !solution.empty() &&
+        solution[0].size() > 0 && solution[0][0] != 'U' && solution[0][0] != 'R' &&
+        solution[0][0] != 'F' && solution[0][0] != 'D' && solution[0][0] != 'L' &&
+        solution[0][0] != 'B')) {
+        std::cout << "[SOLVER] Cube appears already solved or no solution returned." << std::endl;
+        return;
+    }
+
+    std::cout << "[SOLVER] Solution: ";
+    for (const auto& m : solution) std::cout << m << " ";
+    std::cout << std::endl;
+
+    moveQueue.clear();
+    for (const std::string& m : solution) {
+        if (m.empty()) continue;
+        char face = m[0];
+        if (face != 'U' && face != 'R' && face != 'F' &&
+            face != 'D' && face != 'L' && face != 'B') continue;
+
+        if (m.size() == 1) {
+            moveQueue.push_back({face, -90.0f});
+        } else if (m.size() >= 2 && m[1] == '\'') {
+            moveQueue.push_back({face, 90.0f});
+        } else if (m.size() >= 2 && m[1] == '2') {
+            moveQueue.push_back({face, -90.0f});
+            moveQueue.push_back({face, -90.0f});
+        }
+    }
+
+    if (moveQueue.empty()) {
+        std::cout << "[SOLVER] No valid moves in solution." << std::endl;
+        return;
+    }
+
+    isExecutingSequence = true;
+    sequenceSpeedMultiplier = 1.5f;
+    std::cout << "[SOLVER] " << moveQueue.size() << " moves queued at "
+              << sequenceSpeedMultiplier << "x speed." << std::endl;
+}
 
 CuboRubik::~CuboRubik() {
-    /*
-        // Cleanup buffers
-        for (const auto& cube : cubeBuffers) {
-            glDeleteVertexArrays(1, &cube.second.VAO);
-            glDeleteBuffers(1, &cube.second.VBO);
-        }
-            */
-    }
+}
 		
 
 #endif // RUBIK_H_

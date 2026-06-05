@@ -8,24 +8,6 @@ COMPUTACION GRAFICA - 2026-I
 - WALTER VALDIVIA
 
 Proyecto CUBO RUBIK
-
-11/11
-1. modelado -> 26 cubos
-2. rendering/apariencia -> color, textura
-3. animacion 1 -> rotaciones camadas horizontal/vertical
-4. animacion 2 -> conectar el cubo con un solver(c++)
-    - solver:
-        - analizar el estado actual
-        - secuencia de rotaciones aplicadas a las camadas H/V
-        - rotacion +- 90, 180, 270 grados
-5. (PLUS) animacion propia
-    - traer propuesta
-    - presentacion de 6 slides
-        - con ideas concretas
-        - como se van a hacer los movimientos
-        - formulas, fisica
-        - todo es acumulativo
-
 main.cpp
 */
 
@@ -35,6 +17,11 @@ main.cpp
 
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height); //dimensionar la pantalla
+
+// Compile-time animation speed defines
+#define DEFAULT_SCRAMBLE_SPEED  4.0f
+#define DEFAULT_SOLVE_SPEED     1.5f
+#define SCRAMBLE_NUM_MOVES      50
 
 // resolucion de la ventana
 const unsigned int SCR_WIDTH = 800;
@@ -214,6 +201,7 @@ int main()
     glDeleteShader(fragmentShader);
 
     cuboRubik->init();
+    cuboRubik->printMenu();
 
     // tell opengl for each sampler to which texture it belongs
     glUseProgram(shaderProgram);
@@ -338,7 +326,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     // This prevents queuing multiple simultaneous rotations which would
     // corrupt the cube's logical and visual state.
     //
-    if (!cuboRubik->is_animation_running()) {
+    if (!cuboRubik->is_animation_running() && !cuboRubik->isSequenceRunning()) {
         // rotate cube faces
         if (key == GLFW_KEY_T && action == GLFW_PRESS) {
             cuboRubik->rotateU(isClockwise);
@@ -382,7 +370,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
     // -------------------------------------------------
 
-    // (cristian) 2. TRASLACI�N CONTINUA DEL CUBO
+    // 2. TRASLACION CONTINUA DEL CUBO
     // Global translation is allowed during animation
     float velocidadTraslacion = 2.5f; // Unidades espaciales por segundo
     float pasoTraslacion = velocidadTraslacion * deltaTime;
@@ -408,7 +396,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
 
 
-    // (cristian )3. ROTACI�N CONTINUA DEL CUBO GLOBAL (Basada en tiempo real)
+    // 3. ROTACION CONTINUA DEL CUBO GLOBAL (Basada en tiempo real)
     // Global rotation is allowed during animation
     float velocidadRotacion = 90.0f; // Grados por segundo
     float pasoAngulo = velocidadRotacion * deltaTime;
@@ -422,15 +410,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
         cuboRubik->rotarCuboGlobalY(pasoAngulo);
     }
-    // NOTE: GLFW_KEY_V is also used for slice rotation (rotateSV).
-    // Since V is pressed (not just tapped), this continuous rotation
-    // only fires when V is held. The slice rotation above fires on press.
-    // These don't conflict because one is action==GLFW_PRESS and the other
-    // is a held-key check. However, during animation, the slice rotation
-    // is blocked, so this global rotation on V would still work.
 
     // reset cube - allowed during animation
     if (key == GLFW_KEY_K && action == GLFW_PRESS) {
+        cuboRubik->cancelSequence();
         cuboRubik->resetRubik();
     }  
     
@@ -443,9 +426,43 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     }
     // change display mode to points only - allowed during animation
-    if(key == GLFW_KEY_P && action == GLFW_PRESS){
+    if(key == GLFW_KEY_0 && action == GLFW_PRESS){
         glPolygonMode(GL_FRONT_AND_BACK, GL_POINT);
     }
+    // mostrar menu
+    if(key == GLFW_KEY_P && action == GLFW_PRESS){
+        cuboRubik->printMenu();
+    }
+    // -------------- SOLVER & SCRAMBLE ------------------
+    if (key == GLFW_KEY_J && action == GLFW_PRESS) {
+        cuboRubik->solveRubik();
+    }
+    if (key == GLFW_KEY_M && action == GLFW_PRESS) {
+        cuboRubik->scrambleRubik(SCRAMBLE_NUM_MOVES);
+    }
+    // -------------- SEQUENCE SPEED CONTROL ------------------
+    if (key == GLFW_KEY_1 && action == GLFW_PRESS) {
+        cuboRubik->setSequenceSpeed(1.0f);
+    }
+    if (key == GLFW_KEY_2 && action == GLFW_PRESS) {
+        cuboRubik->setSequenceSpeed(2.0f);
+    }
+    if (key == GLFW_KEY_3 && action == GLFW_PRESS) {
+        cuboRubik->setSequenceSpeed(4.0f);
+    }
+    if (key == GLFW_KEY_4 && action == GLFW_PRESS) {
+        cuboRubik->setSequenceSpeed(8.0f);
+    }
+    if (key == GLFW_KEY_5 && action == GLFW_PRESS) {
+        cuboRubik->setSequenceSpeed(16.0f);
+    }
+    if (key == GLFW_KEY_EQUAL && action == GLFW_PRESS) {
+        cuboRubik->setSequenceSpeed(cuboRubik->getSequenceSpeed() + 1.0f);
+    }
+    if (key == GLFW_KEY_MINUS && action == GLFW_PRESS) {
+        cuboRubik->setSequenceSpeed(cuboRubik->getSequenceSpeed() - 1.0f);
+    }
+    // -------------------------------------------------
     // change background color - allowed during animation
     if (key == GLFW_KEY_L && action == GLFW_PRESS) {
         backgroundColor = getRandomColor();}
