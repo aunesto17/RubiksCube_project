@@ -14,6 +14,8 @@ main.cpp
 #include "rubik.h"
 #include "helper.h" 
 #include "camera.h"
+#include "skybox.h"
+#include "spaceship.h"
 
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height); //dimensionar la pantalla
@@ -45,6 +47,7 @@ colorVec getRandomColor() {
 // definimos las figuras
 Camera camera;
 CuboRubik * cuboRubik = new CuboRubik(glfwGetTime(), camera);
+Spaceship spaceship;
 bool isClockwise = true; // direccion de rotacion camadas
 
 Transform trans; // temporal para mover el cubo
@@ -156,6 +159,31 @@ int main()
         // Handle error - maybe exit program or use default textures
     }
 
+    // Load spaceship texture
+    unsigned int spaceshipTexID = loadTexture("assets/spaceshiptexture.bmp");
+
+    // Init skybox
+    SkyBox skybox;
+    {
+        std::vector<std::string> cubemapFaces = {
+            "assets/stars/right.jpg",
+            "assets/stars/left.jpg",
+            "assets/stars/top.jpg",
+            "assets/stars/bottom.jpg",
+            "assets/stars/front.jpg",
+            "assets/stars/back.jpg"
+        };
+        if (!skybox.init(cubemapFaces)) {
+            std::cout << "Warning: Failed to load skybox cubemap. Continuing without skybox." << std::endl;
+        }
+    }
+
+    // Init spaceship
+    if (!spaceship.load("assets/spaceship.3DS")) {
+        std::cout << "Warning: Failed to load spaceship model. Continuing without spaceship." << std::endl;
+    }
+    spaceship.setPosition(vec3(8.0f, 0.0f, 0.0f));
+
     // build and compile our shader program
     // ------------------------------------
     // VERTEX SHADER
@@ -225,7 +253,44 @@ int main()
     {
         currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
-        lastFrame = currentFrame;   
+        lastFrame = currentFrame;
+
+        // --- Continuous input polling (every frame, not on key events) ---
+        // CAMERA: WASD orbit + QE zoom
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+            camera.moveForward(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            camera.moveBackward(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            camera.moveLeft(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            camera.moveRight(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+            camera.zoomIn(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+            camera.zoomOut(deltaTime);
+        // SPACESHIP: arrow keys
+        float velNave = 5.0f;
+        float pasoNave = velNave * deltaTime;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            spaceship.moveX(pasoNave);
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            spaceship.moveX(-pasoNave);
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            spaceship.moveZ(-pasoNave);
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            spaceship.moveZ(pasoNave);
+        // CUBE global rotation: Z / X / C
+        float velRot = 90.0f;
+        float pasoAng = velRot * deltaTime;
+        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
+            cuboRubik->rotarCuboGlobalX(pasoAng);
+        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
+            cuboRubik->rotarCuboGlobalX(-pasoAng);
+        if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS)
+            cuboRubik->rotarCuboGlobalY(pasoAng);
+        // ----------------------------------------------------------------
+
         // input
         glfwSetKeyCallback(window, key_callback);
 
@@ -236,6 +301,8 @@ int main()
 		glClearColor(backgroundColor.x, backgroundColor.y, backgroundColor.z, 1.0f);
 
         camera.updateCameraAnimation(deltaTime); // TODO
+
+        camera.setTarget(spaceship.getPosition());
 
         // ---- ANIMATION UPDATE ----
         // Advance any active face/slice rotation animation.
@@ -269,6 +336,13 @@ int main()
         glBindTexture(GL_TEXTURE_2D, ourTextureID);  // Top/Bottom texture
         
         cuboRubik->draw(shaderProgram);
+
+        skybox.draw(viewMatrix, projMatrix);
+
+        // Re-bind spaceship texture before drawing spaceship
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, spaceshipTexID);
+        spaceship.draw(shaderProgram, viewMatrix, projMatrix);
 
         //camera.getViewMatrix(viewMatrix.m);
 
@@ -306,19 +380,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
                   << std::endl;
     }
     // -------------- MOVIMIENTO CAMARA ------------------
-    // Camera movement is always allowed, even during animation
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera.moveForward(deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera.moveBackward(deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera.moveLeft(deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera.moveRight(deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-        camera.zoomIn(deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-        camera.zoomOut(deltaTime);
+    // (WASD/QE camera movement is now polled in the main loop)
     // -------------------------------------------------
     // ---------------- CAMADAS ------------------
     // 
@@ -370,46 +432,11 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
     // -------------------------------------------------
 
-    // 2. TRASLACION CONTINUA DEL CUBO
-    // Global translation is allowed during animation
-    float velocidadTraslacion = 2.5f; // Unidades espaciales por segundo
-    float pasoTraslacion = velocidadTraslacion * deltaTime;
-    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-		cuboRubik->irAlOrigen();
-        cuboRubik->trasladarCuboGlobal(pasoTraslacion, 0.0f, 0.0f);
-		cuboRubik->regresarAPosicionGlobal();
-    }
-    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-		cuboRubik->irAlOrigen();
-        cuboRubik->trasladarCuboGlobal(-pasoTraslacion, 0.0f, 0.0f);
-		cuboRubik->regresarAPosicionGlobal();
-    }
-    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-		cuboRubik->irAlOrigen();
-        cuboRubik->trasladarCuboGlobal(0.0f, pasoTraslacion, 0.0f);
-		cuboRubik->regresarAPosicionGlobal();
-    }
-    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-		cuboRubik->irAlOrigen();
-        cuboRubik->trasladarCuboGlobal(0.0f, -pasoTraslacion, 0.0f);
-		cuboRubik->regresarAPosicionGlobal();
-    }
+    // 2. MOVIMIENTO DE LA NAVE
+    // (Arrow key spaceship movement is now polled in the main loop)
 
-
-    // 3. ROTACION CONTINUA DEL CUBO GLOBAL (Basada en tiempo real)
-    // Global rotation is allowed during animation
-    float velocidadRotacion = 90.0f; // Grados por segundo
-    float pasoAngulo = velocidadRotacion * deltaTime;
-
-    if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) {
-        cuboRubik->rotarCuboGlobalX(pasoAngulo);
-    }
-    if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) {
-        cuboRubik->rotarCuboGlobalX(-pasoAngulo);
-    }
-    if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
-        cuboRubik->rotarCuboGlobalY(pasoAngulo);
-    }
+    // 3. ROTACION CONTINUA DEL CUBO GLOBAL
+    // (Z/X/C cube rotation is now polled in the main loop)
 
     // reset cube - allowed during animation
     if (key == GLFW_KEY_K && action == GLFW_PRESS) {

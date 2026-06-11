@@ -41,6 +41,7 @@ private:
     float fov; 
 
     vec3 positionOffset;
+    vec3 target;
 
     // Internal Math helpers for vec3 (LookAt & Perspective require these)
     vec3 crossProduct(const vec3& a, const vec3& b) {
@@ -98,9 +99,10 @@ public:
           yaw(initYaw), 
           fov(initFov),
           positionOffset(0.0f, 0.0f, 0.0f),
-          orbitSpeed(90.0f),
-          zoomSpeed(10.0f),
-          translationSpeed(10.0f) 
+          target(0.0f, 0.0f, 0.0f),
+          orbitSpeed(150.0f),
+          zoomSpeed(100.0f),
+          translationSpeed(50.0f) 
     {
         clampPitchWithWarning(pitch);
         clampDistanceWithWarning(distance);
@@ -112,6 +114,8 @@ public:
     float getYaw() const { return yaw; }
     float getFov() const { return fov; }
     float getMaxDistance() const { return MAX_DISTANCE; }
+    const vec3& getTarget() const { return target; }
+    void setTarget(const vec3& t) { target = t; }
 
     // --- Setters ---
     void setDistance(float d) { distance = d; clampDistanceWithWarning(distance); }
@@ -125,14 +129,14 @@ public:
         float pitchRad = helper::toRadians(pitch);
         float yawRad = helper::toRadians(yaw);
         
-        float x = distance * std::cos(pitchRad) * std::cos(yawRad);
-        float y = distance * std::sin(pitchRad);
-        float z = distance * std::cos(pitchRad) * std::sin(yawRad);
+        float orbitX = distance * std::cos(pitchRad) * std::cos(yawRad);
+        float orbitY = distance * std::sin(pitchRad);
+        float orbitZ = distance * std::cos(pitchRad) * std::sin(yawRad);
 
-        // EYE
-        vec3 eye(x, y, z);
-        // C
-        vec3 center(0.0f, 0.0f, 0.0f);
+        // EYE = target + spherical offset
+        vec3 eye(target.x + orbitX, target.y + orbitY, target.z + orbitZ);
+        // C = target
+        vec3 center(target.x, target.y, target.z);
         // Up vector
         vec3 up(0.0f, 1.0f, 0.0f);
 
@@ -202,6 +206,7 @@ public:
         pitch = 35.264f;
         yaw = 45.0f;
         fov = 45.0f;
+        target = vec3(0.0f, 0.0f, 0.0f);
         positionOffset = vec3(0.0f, 0.0f, 0.0f);
         cameraAnim = CameraAnimation();
     }
