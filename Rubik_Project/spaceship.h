@@ -9,6 +9,8 @@ class Spaceship {
 public:
     vec3 position{0.0f, 0.0f, 0.0f};
     float scale = 1.0f;
+    float yaw = 0.0f;   // rotacion horizontal (grados), positivo = girar a la izquierda
+    float pitch = 0.0f; // rotacion vertical (grados), positivo = nariz hacia arriba
 
     bool load(const char* filepath) {
         Mesh3DS mesh;
@@ -87,6 +89,37 @@ public:
     void setPosition(const vec3& pos) { position = pos; }
     vec3 getPosition() const { return position; }
 
+    // Calcula la direccion hacia adelante en espacio mundo usando yaw y pitch
+    vec3 getForward() const {
+        float yawRad = helper::toRadians(yaw);
+        float pitchRad = helper::toRadians(pitch);
+        return vec3(-std::sin(yawRad) * std::cos(pitchRad),
+                     std::sin(pitchRad),
+                    -std::cos(yawRad) * std::cos(pitchRad));
+    }
+
+    // Calcula la direccion derecha en el plano horizontal (sin pitch)
+    vec3 getRight() const {
+        float yawRad = helper::toRadians(yaw);
+        return vec3(std::cos(yawRad), 0.0f, -std::sin(yawRad));
+    }
+
+    // Mueve la nave hacia adelante en la direccion que apunta el cockpit
+    void moveForward(float step) {
+        vec3 fwd = getForward();
+        position.x += fwd.x * step;
+        position.y += fwd.y * step;
+        position.z += fwd.z * step;
+    }
+
+    // Mueve la nave hacia atras (direccion opuesta al cockpit)
+    void moveBackward(float step) {
+        vec3 fwd = getForward();
+        position.x -= fwd.x * step;
+        position.y -= fwd.y * step;
+        position.z -= fwd.z * step;
+    }
+
     ~Spaceship() {
         if (VAO) glDeleteVertexArrays(1, &VAO);
         if (VBO) glDeleteBuffers(1, &VBO);
@@ -119,15 +152,49 @@ private:
         return maxDim > 0.0f ? maxDim : 1.0f;
     }
 
+    // Construye la matriz modelo: T(posicion) × Ry(yaw) × Rx(pitch) × CorreccionModelo
+    // CorreccionModelo transforma -Y del modelo (cockpit) a -Z (adelante en OpenGL)
+    // y +Z del modelo (arriba) a +Y (arriba en OpenGL)
     matriz4x4 getModelMatrix() {
-        matriz4x4 m;
-        m.mat = {
-            scale, 0.0f,  0.0f,  position.x,
-            0.0f,  scale, 0.0f,  position.y,
-            0.0f,  0.0f,  scale, position.z,
+        float yawRad = helper::toRadians(yaw);
+        float pitchRad = helper::toRadians(pitch);
+        float cy = std::cos(yawRad), sy = std::sin(yawRad);
+        float cp = std::cos(pitchRad), sp = std::sin(pitchRad);
+
+        matriz4x4 model;
+
+        // Matriz combinada: Traslacion × RotacionY × Escala
+        model.mat = {
+            scale * cy,   0.0f,       scale * sy,   position.x,
+            0.0f,         scale,      0.0f,         position.y,
+           -scale * sy,   0.0f,       scale * cy,   position.z,
+            0.0f,         0.0f,       0.0f,         1.0f
+        };
+
+        // Rotacion de pitch (nariz arriba/abajo) alrededor del eje X local
+        matriz4x4 rxPitch;
+        rxPitch.mat = {
+            1.0f,  0.0f,   0.0f,  0.0f,
+            0.0f,  cp,    -sp,    0.0f,
+            0.0f,  sp,     cp,    0.0f,
+            0.0f,  0.0f,   0.0f,  1.0f
+        };
+
+        model.multMat(rxPitch);
+
+        // Correccion del modelo 3DS: Rz(180°) × Rx(90°)
+        // Transforma: -Y (cockpit) → -Z (adelante), +Z (arriba) → +Y (arriba)
+        matriz4x4 modelCorr;
+        modelCorr.mat = {
+           -1.0f,  0.0f,  0.0f,  0.0f,
+            0.0f,  0.0f,  1.0f,  0.0f,
+            0.0f,  1.0f,  0.0f,  0.0f,
             0.0f,  0.0f,  0.0f,  1.0f
         };
-        return m;
+
+        model.multMat(modelCorr);
+
+        return model;
     }
 };
 

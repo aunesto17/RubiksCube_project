@@ -67,6 +67,14 @@ private:
 
     CameraAnimation cameraAnim;
 
+    // --- Modo camara seguimiento (follow mode) ---
+    bool followMode = false;          // indica si el modo seguimiento esta activo
+    float followDistance = 8.0f;      // distancia detras de la nave
+    float followHeight = 3.0f;        // altura sobre la nave
+    float followSmoothing = 5.0f;     // velocidad de suavizado (mayor = mas rapido)
+    vec3 smoothedEyePos;              // posicion suavizada de la camara (interpola)
+    bool followInitialized = false;   // bandera para inicializar la posicion suavizada
+
     // --- Validation Helpers ---
     void clampPitchWithWarning(float& pitchValue) const {
         if (pitchValue > MAX_PITCH) {
@@ -265,6 +273,72 @@ public:
     }
     
     bool isAnimating() const { return cameraAnim.isAnimating; }
+
+    // Alterna entre modo orbital y modo seguimiento
+    bool isFollowMode() const { return followMode; }
+    void toggleFollowMode() {
+        followMode = !followMode;
+        followInitialized = false; // reinicia la posicion suavizada al cambiar de modo
+        std::cout << "[Camera] Follow mode: " << (followMode ? "ON" : "OFF") << std::endl;
+    }
+
+    // Actualiza la camara para seguir a la nave desde atras y arriba
+    // Calcula la posicion deseada atras de la nave y la suaviza con interpolacion exponencial
+    void updateFollow(const vec3& shipPos, float shipYaw, float shipPitch, float deltaTime) {
+        if (!followMode) return;
+
+        // Calcula la direccion hacia adelante de la nave
+        float shipYawRad = helper::toRadians(shipYaw);
+        float shipPitchRad = helper::toRadians(shipPitch);
+
+        vec3 shipForward(-std::sin(shipYawRad) * std::cos(shipPitchRad),
+                          std::sin(shipPitchRad),
+                         -std::cos(shipYawRad) * std::cos(shipPitchRad));
+
+        // Posicion deseada: detras de la nave + altura sobre ella
+        vec3 desiredEye = shipPos;
+        desiredEye.x -= shipForward.x * followDistance;
+        desiredEye.y -= shipForward.y * followDistance;
+        desiredEye.z -= shipForward.z * followDistance;
+        desiredEye.y += followHeight;
+
+        // Inicializacion: en la primera vez, saltar directo a la posicion deseada
+        if (!followInitialized) {
+            smoothedEyePos = desiredEye;
+            followInitialized = true;
+        } else {
+            // Suavizado exponencial: interpola hacia la posicion deseada cada frame
+            float t = 1.0f - std::exp(-followSmoothing * deltaTime);
+            smoothedEyePos.x += (desiredEye.x - smoothedEyePos.x) * t;
+            smoothedEyePos.y += (desiredEye.y - smoothedEyePos.y) * t;
+            smoothedEyePos.z += (desiredEye.z - smoothedEyePos.z) * t;
+        }
+
+        // Construye la matriz LookAt mirando hacia la posicion de la nave
+        vec3 eye = smoothedEyePos;
+        vec3 center = shipPos;
+        vec3 up(0.0f, 1.0f, 0.0f);
+
+        vec3 w = helper::normalize(vec3(eye.x - center.x, eye.y - center.y, eye.z - center.z));
+        vec3 u = helper::normalize(helper::crossProduct(up, w));
+        vec3 v = helper::crossProduct(w, u);
+
+        matriz4x4 viewMat;
+        viewMat.mat = {
+             u.getX(),  u.getY(),  u.getZ(), -helper::dotProduct(u, eye),
+             v.getX(),  v.getY(),  v.getZ(), -helper::dotProduct(v, eye),
+             w.getX(),  w.getY(),  w.getZ(), -helper::dotProduct(w, eye),
+             0.0f,      0.0f,      0.0f,      1.0f
+        };
+
+        lastFollowView = viewMat;
+    }
+
+    // Devuelve la ultima matriz de vista calculada en modo seguimiento
+    matriz4x4 getFollowViewMatrix() const { return lastFollowView; }
+
+private:
+    matriz4x4 lastFollowView; // cache de la vista follow para usar en el render loop
 };
 
 #endif // CAMERA_H_

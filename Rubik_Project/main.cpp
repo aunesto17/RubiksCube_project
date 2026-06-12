@@ -29,7 +29,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height); //dim
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
-static void key_callback(GLFWwindow*, int, int, int, int); //callback para las teclas
+static void key_callback(GLFWwindow*, int, int, int, int);
+static void cursor_position_callback(GLFWwindow*, double, double); // callback del mouse: rota la nave
 
 class colorVec {
 	public:
@@ -56,11 +57,18 @@ float lastFrame = 0.0f;
 float deltaTime = 0.0f;
 float currentFrame = 0.0f;
 
+float lastMouseX = 400.0f, lastMouseY = 300.0f; // ultima posicion del cursor (para calcular delta)
+bool firstMouse = true;                         // true hasta el primer evento de mouse
+const float mouseSensitivity = 0.1f;            // sensibilidad del mouse para rotar la nave
+
 // initial colors
 colorVec backgroundColor(0.0f, 0.0f, 0.0f); // white background
 
 // variable for current drawing mode
 GLenum currentDrawMode = GL_TRIANGLES;
+
+// Continuous input polling — runs every frame
+void processInput(GLFWwindow* window);
 
 // vertex shader basico con textura
 const char *vertexShaderSource = "#version 330 core\n"
@@ -131,8 +139,10 @@ int main()
         glfwTerminate();
         return -1;
     }
-    glfwMakeContextCurrent(window);  // hace que la ventana del programa aparezca delante de lo demas
+    glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, cursor_position_callback);         // registrar callback del mouse
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);       // capturar y ocultar el cursor
 
     // glad: load all OpenGL function pointers
 	gladLoadGL(glfwGetProcAddress);
@@ -255,41 +265,7 @@ int main()
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        // --- Continuous input polling (every frame, not on key events) ---
-        // CAMERA: WASD orbit + QE zoom
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-            camera.moveForward(deltaTime);
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-            camera.moveBackward(deltaTime);
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-            camera.moveLeft(deltaTime);
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-            camera.moveRight(deltaTime);
-        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-            camera.zoomIn(deltaTime);
-        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-            camera.zoomOut(deltaTime);
-        // SPACESHIP: arrow keys
-        float velNave = 5.0f;
-        float pasoNave = velNave * deltaTime;
-        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
-            spaceship.moveX(pasoNave);
-        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
-            spaceship.moveX(-pasoNave);
-        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
-            spaceship.moveZ(-pasoNave);
-        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
-            spaceship.moveZ(pasoNave);
-        // CUBE global rotation: Z / X / C
-        float velRot = 90.0f;
-        float pasoAng = velRot * deltaTime;
-        if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
-            cuboRubik->rotarCuboGlobalX(pasoAng);
-        if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS)
-            cuboRubik->rotarCuboGlobalX(-pasoAng);
-        if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS)
-            cuboRubik->rotarCuboGlobalY(pasoAng);
-        // ----------------------------------------------------------------
+        processInput(window); // para eventos continuos(nave o camara)
 
         // input
         glfwSetKeyCallback(window, key_callback);
@@ -300,13 +276,16 @@ int main()
 		// color de fondo
 		glClearColor(backgroundColor.x, backgroundColor.y, backgroundColor.z, 1.0f);
 
-        camera.updateCameraAnimation(deltaTime); // TODO
+        camera.updateCameraAnimation(deltaTime);
 
         camera.setTarget(spaceship.getPosition());
 
+        // Actualizar camara de seguimiento si el modo follow esta activo
+        if (camera.isFollowMode()) {
+            camera.updateFollow(spaceship.getPosition(), spaceship.yaw, spaceship.pitch, deltaTime);
+        }
+
         // ---- ANIMATION UPDATE ----
-        // Advance any active face/slice rotation animation.
-        // This must be called once per frame to ensure smooth visual rotation.
         cuboRubik->update_animation(deltaTime);
         // --------------------------
 
@@ -314,7 +293,8 @@ int main()
         projLoc = glGetUniformLocation(shaderProgram, "projection");
         modelLoc = glGetUniformLocation(shaderProgram, "model");
         
-        matriz4x4 viewMatrix = camera.getViewMatrix();
+        // Elegir vista: seguimiento (follow) u orbital, segun el modo activo
+        matriz4x4 viewMatrix = camera.isFollowMode() ? camera.getFollowViewMatrix() : camera.getViewMatrix();
 
         int width, height;
         glfwGetFramebufferSize(window, &width, &height);
@@ -494,6 +474,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     if (key == GLFW_KEY_L && action == GLFW_PRESS) {
         backgroundColor = getRandomColor();}
 
+    // Alternar modo camara: orbital / seguimiento
+    if (key == GLFW_KEY_F && action == GLFW_PRESS) {
+        camera.toggleFollowMode();
+    }
 
 }
 
@@ -505,4 +489,56 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     // make sure the viewport matches the new window dimensions; note that width and 
     // height will be significantly larger than specified on retina displays.
     glViewport(0, 0, width, height);
+}
+
+void processInput(GLFWwindow* window) {
+    // Camara orbital: WASD orbita + QE zoom (solo en modo orbital)
+    if (!camera.isFollowMode()) {
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.moveForward(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camera.moveBackward(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camera.moveLeft(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camera.moveRight(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) camera.zoomIn(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) camera.zoomOut(deltaTime);
+    }
+    // Propulsion de la nave: flechas arriba/abajo mueven, izquierda/derecha rotan yaw
+    const float shipSpeed = 5.0f;
+    float step = shipSpeed * deltaTime;
+    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) spaceship.moveForward(step);
+    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) spaceship.moveBackward(step);
+    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) spaceship.yaw += 90.0f * deltaTime;   // girar a la izquierda
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) spaceship.yaw -= 90.0f * deltaTime;  // girar a la derecha
+    // Rotacion global del cubo Rubik: Z / X / C
+    const float rotSpeed = 90.0f;
+    float ang = rotSpeed * deltaTime;
+    if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) cuboRubik->rotarCuboGlobalX(ang);
+    if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) cuboRubik->rotarCuboGlobalX(-ang);
+    if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) cuboRubik->rotarCuboGlobalY(ang);
+}
+
+// Callback del mouse: calcula el delta de movimiento y aplica rotacion yaw/pitch a la nave
+static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+    float xf = (float)xpos;
+    float yf = (float)ypos;
+
+    // En el primer evento, solo guardar la posicion sin aplicar delta
+    if (firstMouse) {
+        lastMouseX = xf;
+        lastMouseY = yf;
+        firstMouse = false;
+    }
+
+    // Calcular el desplazamiento del mouse desde el frame anterior
+    float dx = xf - lastMouseX;  // delta horizontal
+    float dy = lastMouseY - yf;  // delta vertical (invertido: mouse arriba = positivo)
+    lastMouseX = xf;
+    lastMouseY = yf;
+
+    // Aplicar rotacion: dx negado para que mover el mouse a la derecha gire a la derecha
+    spaceship.yaw -= dx * mouseSensitivity;
+    spaceship.pitch += dy * mouseSensitivity;
+
+    // Limitar pitch para evitar volcadura completa
+    if (spaceship.pitch > 89.0f) spaceship.pitch = 89.0f;
+    if (spaceship.pitch < -89.0f) spaceship.pitch = -89.0f;
 }
