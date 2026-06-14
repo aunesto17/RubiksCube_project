@@ -17,7 +17,7 @@ public:
         if (!Load3DS(mesh, filepath)) return false;
 
         float size = computeSize(mesh);
-        scale = 2.0f / size;
+        scale =1.0f / size;
         std::cout << "[Spaceship] Auto-scale: " << scale << " (model size: " << size << ")" << std::endl;
 
         std::vector<float> vertexData;

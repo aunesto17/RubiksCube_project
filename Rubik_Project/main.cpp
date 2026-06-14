@@ -16,6 +16,7 @@ main.cpp
 #include "camera.h"
 #include "skybox.h"
 #include "spaceship.h"
+#include "blackhole.h"
 
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height); //dimensionar la pantalla
@@ -132,7 +133,7 @@ int main()
     // --------------------
     // glfw window creation
     // --------------------
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Project_Rubik", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Rubik + Black Hole", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -172,22 +173,15 @@ int main()
     // Load spaceship texture
     unsigned int spaceshipTexID = loadTexture("assets/spaceshiptexture.bmp");
 
-    // Init skybox
-    SkyBox skybox;
-    {
-        std::vector<std::string> cubemapFaces = {
-            "assets/stars/right.jpg",
-            "assets/stars/left.jpg",
-            "assets/stars/top.jpg",
-            "assets/stars/bottom.jpg",
-            "assets/stars/front.jpg",
-            "assets/stars/back.jpg"
-        };
-        if (!skybox.init(cubemapFaces)) {
-            std::cout << "Warning: Failed to load skybox cubemap. Continuing without skybox." << std::endl;
-        }
-    }
-
+    // Init agujero negro (reemplaza skybox de estrellas)
+    BlackHole blackhole;
+    blackhole.init();
+	blackhole.position[0] = 20.0f;  // mueve el BH lejos del Rubik en X
+	blackhole.bhRadius     = 2.0f;
+	blackhole.diskInner    = 3.0f;
+	blackhole.diskOuter    = 8.0f;
+	blackhole.diskParticles = 500;
+	blackhole.diskAlpha = 0.5;
     // Init spaceship
     if (!spaceship.load("assets/spaceship.3DS")) {
         std::cout << "Warning: Failed to load spaceship model. Continuing without spaceship." << std::endl;
@@ -317,7 +311,14 @@ int main()
         
         cuboRubik->draw(shaderProgram);
 
-        skybox.draw(viewMatrix, projMatrix);
+        // Agujero negro: skybox nebulosa + esfera negra + disco de acrecion
+        blackhole.update(deltaTime);
+        blackhole.draw(viewMatrix, projMatrix);
+
+        // Restaurar estado para el shader del Rubik/nave
+        glUseProgram(shaderProgram);
+        glUniformMatrix4fv(viewLoc,  1, GL_TRUE, viewMatrix.mat.data());
+        glUniformMatrix4fv(projLoc,  1, GL_TRUE, projMatrix.mat.data());
 
         // Re-bind spaceship texture before drawing spaceship
         glActiveTexture(GL_TEXTURE0);
