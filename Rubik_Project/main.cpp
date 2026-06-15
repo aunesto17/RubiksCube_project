@@ -7,8 +7,8 @@ COMPUTACION GRAFICA - 2026-I
 - JOSE VILCA
 - WALTER VALDIVIA
 
-Proyecto CUBO RUBIK
-main.cpp
+Proyecto CUBO RUBIK + ESCAPE ESPACIAL DE ASTEROIDES Y AGUJERO NEGRO
+main_final_unificado.cpp
 */
 
 #include "rubik.h"
@@ -129,7 +129,6 @@ const char *fragmentShaderTexSource = "#version 330 core\n"
 int main()
 {
     // glfw: initialize and configure
-    // ------------------------------
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -162,140 +161,104 @@ int main()
     glEnable(GL_BLEND); // para transparencia en texturas
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // mezcla de textura con triangulos
 
-    // ---------------------------------------
-    // texturas
-    // ---------------------------------------
-    unsigned int ourTextureID;
+    // CARGA DE TEXTURAS Y MALLAS
+    unsigned int ourTextureID = loadTexture("assets/cubitoBorder.png");
 
-    //Load each texture and check for errors
-    ourTextureID = loadTexture("assets/cubitoBorder.png");
-
-    // Verify all textures loaded successfully
     if (ourTextureID) {
         std::cout << "All textures loaded successfully!" << std::endl;
     } else {
         std::cout << "Failed to load one or more textures!" << std::endl;
-        // Handle error - maybe exit program or use default textures
     }
 
-    // Load spaceship texture
+    // Cargar textura de la nave
     unsigned int spaceshipTexID = loadTexture("assets/spaceshiptexture.bmp");
 
-    // Init agujero negro (reemplaza skybox de estrellas)
+    // Cargar textura y malla del asteroide
+    asteroideTexID = loadTexture("assets/asteroide.jpg");
+    Asteroid::loadMesh("assets/asteroide.3ds");
+
+    // Inicializar Agujero Negro (Reemplaza al Skybox estándar)
     BlackHole blackhole;
     blackhole.init();
-	blackhole.position[0] = 20.0f;  // mueve el BH lejos del Rubik en X
+	blackhole.position[0] = 20.0f;  // Mueve el BH lejos del Rubik en X
 	blackhole.bhRadius     = 2.0f;
 	blackhole.diskInner    = 3.0f;
 	blackhole.diskOuter    = 8.0f;
 	blackhole.diskParticles = 500;
 	blackhole.diskAlpha = 0.5;
-    // Init spaceship
+
+    // Inicializar Nave Espacial
     if (!spaceship.load("assets/spaceship.3DS")) {
         std::cout << "Warning: Failed to load spaceship model. Continuing without spaceship." << std::endl;
     }
-    spaceship.setPosition(vec3(8.0f, 0.0f, 0.0f));
+    
+    // Posición inicial de juego de la nave (Tomada de tu versión de asteroides)
+    spaceship.setPosition(vec3(0.0f, 0.0f, -10.0f));
 
-    // build and compile our shader program
-    // ------------------------------------
-    // VERTEX SHADER
+    // Compilación de Shaders
     unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
     glCompileShader(vertexShader);
-    // check for shader compile errors
-    int success;
-    char infoLog[512];
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(vertexShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::VERTEX::0::COMPILATION_FAILED\n" << infoLog << std::endl;
-    }
 
-    // FRAGMENT SHADER   
     unsigned int fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentShader, 1, &fragmentShaderTexSource, NULL);
     glCompileShader(fragmentShader);
-    // check for shader compile errors
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success)
-    {
-        glGetShaderInfoLog(fragmentShader, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
-    }
 
-    // LINK SHADERS and form a SHADER PROGRAM
     unsigned int shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
-	// check for linking errors
-    glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-    if (!success) {
-        glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-        std::cout << "ERROR::SHADER::PROGRAM::0::LINKING_FAILED\n" << infoLog << std::endl;
-    }
 
-    // delete used Shaders
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
     cuboRubik->init();
     cuboRubik->printMenu();
 
-    // tell opengl for each sampler to which texture it belongs
     glUseProgram(shaderProgram);
-
     int ourTextureLoc = glGetUniformLocation(shaderProgram, "ourTexture");
+    glUniform1i(ourTextureLoc, 0); // Textura en unidad 0
 
-    // Set texture units
-    glUniform1i(ourTextureLoc, 0); // Texture unit 0
-
-    // point and line sizes
-	glPointSize(10.f);
+    glPointSize(10.f);
     glLineWidth(5.f);
 
-    // cam variables
-    float cameraSpeed = 0.05f;
-    bool unaPrueba=true;
+    // Sincronizar tiempo de inicio
+    lastFrame = glfwGetTime();
 
-    // render loop
-    // -----------
+    // RENDER LOOP UNIFICADO
     while (!glfwWindowShouldClose(window))
     {
         currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
-        processInput(window); // para eventos continuos(nave o camara)
+        // Captura de controles continuos (Cámara Orbital, Nave y Rotación del Cubo)
+        processInput(window); 
 
-        // input
+        // Listener de eventos discretos (Teclas de control del Cubo)
         glfwSetKeyCallback(window, key_callback);
 
+        // Limpieza de pantalla
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        // render
-        // ------
-		// color de fondo
 		glClearColor(backgroundColor.x, backgroundColor.y, backgroundColor.z, 1.0f);
 
+        // Actualización de Animaciones lógicas y de cámara
         camera.updateCameraAnimation(deltaTime);
-
         camera.setTarget(spaceship.getPosition());
 
-        // Actualizar camara de seguimiento si el modo follow esta activo
         if (camera.isFollowMode()) {
             camera.updateFollow(spaceship.getPosition(), spaceship.yaw, spaceship.pitch, deltaTime);
         }
 
-        // ---- ANIMATION UPDATE ----
         cuboRubik->update_animation(deltaTime);
-        // --------------------------
 
+        // Obtener locations para transformaciones de matrices del Shader principal
         viewLoc = glGetUniformLocation(shaderProgram, "view");
         projLoc = glGetUniformLocation(shaderProgram, "projection");
         modelLoc = glGetUniformLocation(shaderProgram, "model");
+        ourTextureLoc = glGetUniformLocation(shaderProgram, "ourTexture");
         
-        // Elegir vista: seguimiento (follow) u orbital, segun el modo activo
+        // Seleccionar matriz de vista activa (Seguimiento o Libre)
         matriz4x4 viewMatrix = camera.isFollowMode() ? camera.getFollowViewMatrix() : camera.getViewMatrix();
 
         int width, height;
@@ -402,6 +365,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     )) {
         std::cout << "[INPUT] Rotation key ignored: animation in progress." << std::endl;
     }
+
     if (key == GLFW_KEY_K && action == GLFW_PRESS) {
         cuboRubik->cancelSequence();
         cuboRubik->resetRubik();
