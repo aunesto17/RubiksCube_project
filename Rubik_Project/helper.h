@@ -228,6 +228,14 @@ static inline std::array<float, 9> extractNormalMatrix(const matriz4x4& m) {
     return n;
 }
 
+// Deteccion de colision esfera-esfera (usa distancia al cuadrado para evitar sqrt)
+static inline bool checkSphereCollision(const vec3& posA, float radiusA,
+                                        const vec3& posB, float radiusB) {
+    vec3 diff = posA - posB;
+    float distSq = dotProduct(diff, diff);
+    float radiusSum = radiusA + radiusB;
+    return distSq < (radiusSum * radiusSum);
+}
 
 
 } // namespace helper

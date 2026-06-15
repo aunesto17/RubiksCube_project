@@ -107,6 +107,7 @@ public:
     void moveZ(float delta) { position.z += delta; }
     void setPosition(const vec3& pos) { position = pos; }
     vec3 getPosition() const { return position; }
+    float getCollisionRadius() const { return collisionRadius; }
 
     // Calcula la direccion hacia adelante en world usando yaw y pitch
     vec3 getForward() const {
@@ -151,6 +152,32 @@ public:
         glBindVertexArray(VAO);
         glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
         glBindVertexArray(0);
+private:
+    unsigned int VAO = 0, VBO = 0, EBO = 0;
+    int indexCount = 0;
+    bool m_loaded = false;
+    float collisionRadius = 0.5f;
+
+    float computeSize(const Mesh3DS& mesh) {
+        if (mesh.vertices.empty()) return 1.0f;
+        float minX = mesh.vertices[0].getX(), maxX = minX;
+        float minY = mesh.vertices[0].getY(), maxY = minY;
+        float minZ = mesh.vertices[0].getZ(), maxZ = minZ;
+        for (const auto& v : mesh.vertices) {
+            if (v.getX() < minX) minX = v.getX();
+            if (v.getX() > maxX) maxX = v.getX();
+            if (v.getY() < minY) minY = v.getY();
+            if (v.getY() > maxY) maxY = v.getY();
+            if (v.getZ() < minZ) minZ = v.getZ();
+            if (v.getZ() > maxZ) maxZ = v.getZ();
+        }
+        float dx = maxX - minX;
+        float dy = maxY - minY;
+        float dz = maxZ - minZ;
+        float maxDim = dx > dy ? dx : dy;
+        maxDim = maxDim > dz ? maxDim : dz;
+        collisionRadius = maxDim > 0.0f ? (maxDim * 0.5f * (1.0f / maxDim)) : 0.5f;
+        return maxDim > 0.0f ? maxDim : 1.0f;
     }
 
     // Construye la matriz modelo: T(posicion) × Ry(yaw) × Rx(pitch) × CorreccionModelo
