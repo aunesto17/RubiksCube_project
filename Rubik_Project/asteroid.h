@@ -43,44 +43,47 @@ public:
         
         float baseScale = 1.5f / maxDim;
 
+        // Compute per-vertex normals from face normals
+        std::vector<vec3> normals = helper::computeNormals(mesh.vertices, mesh.indices);
+
         std::vector<float> vertexData;
-        vertexData.reserve(mesh.vertices.size() * 8);
+        vertexData.reserve(mesh.vertices.size() * 11);
         for (size_t i = 0; i < mesh.vertices.size(); i++) {
             const vec3& v = mesh.vertices[i];
-            
-            // 1. Posición (Atributo 0)
-            vertexData.push_back(v.getX()); 
-            vertexData.push_back(v.getY()); 
+            const vec3& n = normals[i];
+
+            // 1. Position (location 0)
+            vertexData.push_back(v.getX());
+            vertexData.push_back(v.getY());
             vertexData.push_back(v.getZ());
-            
-            // 2. Color por defecto (Atributo 1)
-            vertexData.push_back(0.6f); 
-            vertexData.push_back(0.6f); 
-            vertexData.push_back(0.7f); 
-            
-            // 3. Coordenadas de Textura (Atributo 2)
+
+            // 2. Normal (location 1)
+            vertexData.push_back(n.getX());
+            vertexData.push_back(n.getY());
+            vertexData.push_back(n.getZ());
+
+            // 3. Color (location 2)
+            vertexData.push_back(0.6f);
+            vertexData.push_back(0.6f);
+            vertexData.push_back(0.7f);
+
+            // 4. Texture coordinates (location 3)
             if (i < mesh.texCoords.size() && (mesh.texCoords[i].getX() != 0.0f || mesh.texCoords[i].getY() != 0.0f)) {
-                vertexData.push_back(mesh.texCoords[i].getX()); 
+                vertexData.push_back(mesh.texCoords[i].getX());
                 vertexData.push_back(mesh.texCoords[i].getY());
             } else {
-                // ¡Mapeo Esférico de Respaldo! 
-                // Usamos la dirección del vértice respecto al centro para envolver el asteroide como una pelota.
+                // Spherical UV fallback
                 float length = sqrtf(v.getX()*v.getX() + v.getY()*v.getY() + v.getZ()*v.getZ());
-                
                 float u = 0.5f;
                 float v_tex = 0.5f;
-                
                 if (length > 0.0f) {
                     float nx = v.getX() / length;
                     float ny = v.getY() / length;
                     float nz = v.getZ() / length;
-                    
-                    // Fórmulas matemáticas para convertir coordenadas 3D en un mapa 2D (U, V) entre 0 y 1
                     u = 0.5f + (atan2f(nz, nx) / (2.0f * 3.141592f));
                     v_tex = 0.5f + (asinf(ny) / 3.141592f);
                 }
-                
-                vertexData.push_back(u); 
+                vertexData.push_back(u);
                 vertexData.push_back(v_tex);
             }
         }
@@ -98,12 +101,16 @@ public:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sharedEBO);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices.size() * sizeof(unsigned short), mesh.indices.data(), GL_STATIC_DRAW);
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        // Layout: 3 pos + 3 normal + 3 color + 2 texCoord = 11 floats (44 bytes)
+        GLsizei stride = 11 * sizeof(float);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, stride, (void*)(9 * sizeof(float)));
+        glEnableVertexAttribArray(3);
 
         glBindVertexArray(0);
         isMeshLoaded = true;
@@ -140,18 +147,6 @@ public:
         rotZ += rotSpeedZ * deltaTime;
     }
 
-    void draw(unsigned int shaderProgram) {
-        if (!isMeshLoaded) return;
-
-        matriz4x4 model = getModelMatrix();
-        GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
-        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, model.mat.data());
-
-        glBindVertexArray(sharedVAO);
-        glDrawElements(GL_TRIANGLES, sharedIndexCount, GL_UNSIGNED_SHORT, 0);
-    }
-
-private:
     matriz4x4 getModelMatrix() {
         matriz4x4 m;
         float cx = cosf(rotX), sx = sinf(rotX);
@@ -167,6 +162,22 @@ private:
             0.0f,               0.0f,                    0.0f,                    1.0f
         };
         return m;
+    }
+
+    // Draw with model matrix pre-uploaded by caller (for lighting normal matrix)
+    void drawRaw(unsigned int shaderProgram) {
+        if (!isMeshLoaded) return;
+        glBindVertexArray(sharedVAO);
+        glDrawElements(GL_TRIANGLES, sharedIndexCount, GL_UNSIGNED_SHORT, 0);
+    }
+
+    // Legacy draw that uploads its own model matrix
+    void draw(unsigned int shaderProgram) {
+        if (!isMeshLoaded) return;
+        matriz4x4 model = getModelMatrix();
+        GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
+        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, model.mat.data());
+        drawRaw(shaderProgram);
     }
 };
 

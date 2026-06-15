@@ -80,49 +80,104 @@ GLenum currentDrawMode = GL_TRIANGLES;
 // Continuous input polling — runs every frame
 void processInput(GLFWwindow* window);
 
-// vertex shader basico con textura
+// Vertex shader with normals and lighting support
 const char *vertexShaderSource = "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
-    "layout (location = 1) in vec3 aColor;\n"
-    "layout (location = 2) in vec2 aTexCoord;\n"
+    "layout (location = 1) in vec3 aNormal;\n"
+    "layout (location = 2) in vec3 aColor;\n"
+    "layout (location = 3) in vec2 aTexCoord;\n"
 
+    "out vec3 FragPos;\n"
+    "out vec3 Normal;\n"
     "out vec3 ourColor;\n"
     "out vec2 TexCoord;\n"
 
     "uniform mat4 model;\n"
     "uniform mat4 view;\n"
     "uniform mat4 projection;\n"
+    "uniform mat3 normalMatrix;\n"
 
     "void main()\n"
     "{\n"
-    "   gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
+    "   FragPos = vec3(model * vec4(aPos, 1.0));\n"
+    "   Normal = normalize(normalMatrix * aNormal);\n"
     "   ourColor = aColor;\n"
-    "   TexCoord = vec2(aTexCoord.x,aTexCoord.y);\n"
+    "   TexCoord = aTexCoord;\n"
+    "   gl_Position = projection * view * model * vec4(aPos, 1.0);\n"
     "}\0";
 
-// fragment shader con textura y blending
+// Fragment shader with ambient + directional + point lighting
 const char *fragmentShaderTexSource = "#version 330 core\n"
     "out vec4 FragColor;\n"
 
+    "in vec3 FragPos;\n"
+    "in vec3 Normal;\n"
     "in vec3 ourColor;\n"
     "in vec2 TexCoord;\n"
 
-    "uniform sampler2D ourTexture;\n" 
+    "uniform sampler2D ourTexture;\n"
+
+    // Directional light
+    "uniform vec3 lightDir;\n"
+    "uniform vec3 lightColor;\n"
+    "uniform float lightIntensity;\n"
+
+    // Ambient
+    "uniform float ambientStrength;\n"
+    "uniform vec3 ambientColor;\n"
+
+    // Point lights (max 2)
+    "uniform vec3 pointLightPos[2];\n"
+    "uniform vec3 pointLightColor[2];\n"
+    "uniform float pointLightIntensity[2];\n"
+    "uniform float pointLightConstant[2];\n"
+    "uniform float pointLightLinear[2];\n"
+    "uniform float pointLightQuadratic[2];\n"
+    "uniform int numPointLights;\n"
+
+    // View position for specular
+    "uniform vec3 viewPos;\n"
+
+    "vec3 calcDirLight(vec3 baseColor)\n"
+    "{\n"
+    "   float diff = max(dot(Normal, normalize(-lightDir)), 0.0);\n"
+    "   return diff * lightColor * lightIntensity * baseColor;\n"
+    "}\n"
+
+    "vec3 calcPointLight(int idx, vec3 baseColor)\n"
+    "{\n"
+    "   vec3 L = pointLightPos[idx] - FragPos;\n"
+    "   float dist = length(L);\n"
+    "   L = normalize(L);\n"
+    "   float diff = max(dot(Normal, L), 0.0);\n"
+    "   float atten = 1.0 / (pointLightConstant[idx] +\n"
+    "                        pointLightLinear[idx] * dist +\n"
+    "                        pointLightQuadratic[idx] * dist * dist);\n"
+    "   return diff * pointLightColor[idx] * pointLightIntensity[idx] * atten * baseColor;\n"
+    "}\n"
 
     "void main()\n"
     "{\n"
-    "   // Sample from the single texture\n"
+    "   // Base color from texture + vertex color\n"
     "   vec4 texColor = texture(ourTexture, TexCoord);\n"
-
-    "   // Handle transparency and color blending (same logic as before)\n"
+    "   vec3 baseColor;\n"
     "   if(texColor.a < 0.1) {\n"
-    "       // If mostly transparent, use the face color\n"
-    "       FragColor = vec4(ourColor, 1.0);\n"
+    "       baseColor = ourColor;\n"
     "   } else {\n"
-    "       // Otherwise blend the texture with the face color\n"
-    "       vec3 blendedColor = mix(ourColor, texColor.rgb, 0.7);\n"
-    "       FragColor = vec4(blendedColor, 1.0);\n"
+    "       baseColor = mix(ourColor, texColor.rgb, 0.7);\n"
     "   }\n"
+
+    "   // Ambient\n"
+    "   vec3 result = ambientStrength * ambientColor * baseColor;\n"
+
+    "   // Directional light\n"
+    "   result += calcDirLight(baseColor);\n"
+
+    "   // Point lights\n"
+    "   for(int i = 0; i < numPointLights && i < 2; i++)\n"
+    "       result += calcPointLight(i, baseColor);\n"
+
+    "   FragColor = vec4(result, 1.0);\n"
     "}\0";
 
 
@@ -180,6 +235,12 @@ int main()
 
     // Load spaceship texture
     unsigned int spaceshipTexID = loadTexture("assets/spaceshiptexture.bmp");
+
+    // Load asteroid texture
+    asteroideTexID = loadTexture("assets/asteroide.jpg");
+    if (asteroideTexID == 0) {
+        std::cout << "[WARNING] Failed to load asteroid texture. Asteroids will use vertex colors only." << std::endl;
+    }
 
     // Init agujero negro (reemplaza skybox de estrellas)
     BlackHole blackhole;
@@ -251,8 +312,53 @@ int main()
     // Set texture units
     glUniform1i(ourTextureLoc, 0); // Texture unit 0
 
+    // --- PHASE 1+2: LIGHTING UNIFORM LOCATIONS ---
+    lightDirLoc         = glGetUniformLocation(shaderProgram, "lightDir");
+    lightColorLoc       = glGetUniformLocation(shaderProgram, "lightColor");
+    lightIntensityLoc   = glGetUniformLocation(shaderProgram, "lightIntensity");
+    ambientStrengthLoc  = glGetUniformLocation(shaderProgram, "ambientStrength");
+    ambientColorLoc     = glGetUniformLocation(shaderProgram, "ambientColor");
+    viewPosLoc          = glGetUniformLocation(shaderProgram, "viewPos");
+    normalMatrixLoc     = glGetUniformLocation(shaderProgram, "normalMatrix");
+    numPointLightsLoc   = glGetUniformLocation(shaderProgram, "numPointLights");
+    for (int i = 0; i < 2; i++) {
+        std::string idx = "[" + std::to_string(i) + "]";
+        pointLightPosLoc[i]        = glGetUniformLocation(shaderProgram, ("pointLightPos" + idx).c_str());
+        pointLightColorLoc[i]      = glGetUniformLocation(shaderProgram, ("pointLightColor" + idx).c_str());
+        pointLightIntensityLoc[i]  = glGetUniformLocation(shaderProgram, ("pointLightIntensity" + idx).c_str());
+        pointLightConstantLoc[i]   = glGetUniformLocation(shaderProgram, ("pointLightConstant" + idx).c_str());
+        pointLightLinearLoc[i]     = glGetUniformLocation(shaderProgram, ("pointLightLinear" + idx).c_str());
+        pointLightQuadraticLoc[i]  = glGetUniformLocation(shaderProgram, ("pointLightQuadratic" + idx).c_str());
+    }
+
+    // --- PHASE 1: DIRECTIONAL LIGHT SETUP ---
+    glUniform3f(lightDirLoc,        0.0f, 0.707f, 0.707f);
+    glUniform3f(lightColorLoc,      1.0f, 0.95f, 0.8f);
+    glUniform1f(lightIntensityLoc,  1.0f);
+    glUniform1f(ambientStrengthLoc, 0.15f);
+    glUniform3f(ambientColorLoc,    0.1f, 0.1f, 0.15f);
+
+    // --- PHASE 2: POINT LIGHT DEFAULTS ---
+    glUniform1i(numPointLightsLoc, 1);
+    // Point light 0 = Black Hole (position updated per frame)
+    glUniform3f(pointLightPosLoc[0],       0.0f, 0.0f, 0.0f);
+    glUniform3f(pointLightColorLoc[0],     1.0f, 0.35f, 0.05f);
+    glUniform1f(pointLightIntensityLoc[0], 2.5f);
+    glUniform1f(pointLightConstantLoc[0],  1.0f);
+    glUniform1f(pointLightLinearLoc[0],    0.09f);
+    glUniform1f(pointLightQuadraticLoc[0], 0.032f);
+    // Point light 1 = Distant blue star (optional fill)
+    glUniform3f(pointLightPosLoc[1],       -50.0f, 30.0f, -20.0f);
+    glUniform3f(pointLightColorLoc[1],     0.3f, 0.5f, 0.8f);
+    glUniform1f(pointLightIntensityLoc[1], 0.5f);
+    glUniform1f(pointLightConstantLoc[1],  1.0f);
+    glUniform1f(pointLightLinearLoc[1],    0.045f);
+    glUniform1f(pointLightQuadraticLoc[1], 0.0075f);
+
+    std::cout << "[LIGHTING] Phase 1+2: Directional + Point lights initialized." << std::endl;
+
     // point and line sizes
-	glPointSize(10.f);
+    glPointSize(10.f);
     glLineWidth(5.f);
 
     // cam variables
@@ -307,18 +413,36 @@ int main()
         blackhole.update(deltaTime);
         blackhole.draw(viewMatrix, projMatrix);
 
-        // 2. ACTIVAR SHADER PRINCIPAL CON TEXTURAS PARA LOS OBJETOS 3D
+        // 2. ACTIVAR SHADER PRINCIPAL CON ILUMINACIÓN PARA LOS OBJETOS 3D
         glUseProgram(shaderProgram);
 
-        // Enviar matrices de cámara actualizadas al shader program
+        // --- PHASE 1+2: PER-FRAME LIGHTING UNIFORMS ---
+        vec3 shipPos = spaceship.getPosition();
+        vec3 bhPos(blackhole.position[0], blackhole.position[1], blackhole.position[2]);
+
+        // View position
+        vec3 viewPosVal = camera.isFollowMode()
+            ? shipPos + vec3(0.0f, 3.0f, 8.0f)
+            : vec3(0.0f, 0.0f, 15.0f);
+        glUniform3f(viewPosLoc, viewPosVal.x, viewPosVal.y, viewPosVal.z);
+
+        // Phase 2: Black hole as point light 0
+        glUniform3f(pointLightPosLoc[0], bhPos.x, bhPos.y, bhPos.z);
+        float distToBH = helper::length(shipPos - bhPos);
+        float proximityBoost = 1.0f + 4.0f / (1.0f + distToBH * 0.05f);
+        glUniform1f(pointLightIntensityLoc[0], 2.5f * proximityBoost);
+
+        // Upload view/projection matrices
         glUniformMatrix4fv(viewLoc, 1, GL_TRUE, viewMatrix.mat.data());
         glUniformMatrix4fv(projLoc, 1, GL_TRUE, projMatrix.mat.data());
 
-        // CUBO RUBIK
-        matriz4x4 modelMatrixCube; // Matriz identidad base
+        // --- CUBO RUBIK ---
+        matriz4x4 modelMatrixCube; // Identity — vertices are CPU-transformed
+        std::array<float, 9> normalMatrixCube = {1,0,0, 0,1,0, 0,0,1};
         glUniformMatrix4fv(modelLoc, 1, GL_TRUE, modelMatrixCube.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_TRUE, normalMatrixCube.data());
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, ourTextureID);  
+        glBindTexture(GL_TEXTURE_2D, ourTextureID);
         cuboRubik->draw(shaderProgram);
 
         // GENERACIÓN DINÁMICA DE ASTEROIDES
@@ -336,30 +460,40 @@ int main()
             tiempoUltimoAsteroide = currentFrame; 
         }
 
-        // ACTUALIZACIÓN Y RENDERIZADO DE LOS ASTEROIDES
-        glUniform1i(ourTextureLoc, 0); 
+        // --- ASTEROIDS RENDER ---
+        glUniform1i(ourTextureLoc, 0);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, asteroideTexID); // Textura de roca espacial activa
+        glBindTexture(GL_TEXTURE_2D, asteroideTexID);
 
         for (size_t i = 0; i < listaAsteroides.size(); ) {
             listaAsteroides[i].update(deltaTime);
-            listaAsteroides[i].draw(shaderProgram);
 
-            // Si el asteroide ya rebasó la nave, se elimina para optimizar recursos
+            // Upload model + normal matrix for lighting
+            matriz4x4 astModel = listaAsteroides[i].getModelMatrix();
+            std::array<float, 9> astNormalMat = helper::extractNormalMatrix(astModel);
+            glUniformMatrix4fv(modelLoc, 1, GL_TRUE, astModel.mat.data());
+            glUniformMatrix3fv(normalMatrixLoc, 1, GL_TRUE, astNormalMat.data());
+
+            listaAsteroides[i].drawRaw(shaderProgram);
+
             if (listaAsteroides[i].position.z > 2.0f) {
                 listaAsteroides.erase(listaAsteroides.begin() + i);
             } else {
-                i++; 
+                i++;
             }
         }
 
-        // RENDERIZADO DE LA NAVE JUGADORA
-        glUniform1i(ourTextureLoc, 0); 
+        // --- SPACESHIP RENDER ---
+        glUniform1i(ourTextureLoc, 0);
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, spaceshipTexID); // Cambiar a la textura metálica de la nave
-        
-        spaceship.draw(shaderProgram, viewMatrix, projMatrix);
+        glBindTexture(GL_TEXTURE_2D, spaceshipTexID);
 
+        matriz4x4 shipModel = spaceship.getModelMatrix();
+        std::array<float, 9> shipNormalMat = helper::extractNormalMatrix(shipModel);
+        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, shipModel.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_TRUE, shipNormalMat.data());
+
+        spaceship.drawRaw(shaderProgram);
         // Swap de buffers e IO eventos
         glfwSwapBuffers(window);
         glfwPollEvents();

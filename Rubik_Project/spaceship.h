@@ -6,6 +6,12 @@
 #include "3Dsloader.h"
 
 class Spaceship {
+
+private:
+    unsigned int VAO = 0, VBO = 0, EBO = 0;
+    int indexCount = 0;
+    bool m_loaded = false;
+
 public:
     vec3 position{0.0f, 0.0f, 0.0f};
     float scale = 0.25f;
@@ -14,20 +20,31 @@ public:
 
     bool load(const char* filepath) {
         Mesh3DS mesh;
-        if (!Load3DS(mesh, filepath)) return false;
+        if (!Load3DS(mesh, filepath)) {return false;}
 
-        float size = computeSize(mesh);
+        float size = this->computeSize(mesh);
         scale = 1.0f / size;
         std::cout << "[Spaceship] Auto-scale: " << scale << " (model size: " << size << ")" << std::endl;
 
+        // Compute per-vertex normals from face normals
+        std::vector<vec3> normals = helper::computeNormals(mesh.vertices, mesh.indices);
+
         std::vector<float> vertexData;
-        vertexData.reserve(mesh.vertices.size() * 8);
+        vertexData.reserve(mesh.vertices.size() * 11);
         for (size_t i = 0; i < mesh.vertices.size(); i++) {
             const vec3& v = mesh.vertices[i];
+            const vec3& n = normals[i];
+            // Position (location 0)
             vertexData.push_back(v.getX());
             vertexData.push_back(v.getY());
             vertexData.push_back(v.getZ());
+            // Normal (location 1)
+            vertexData.push_back(n.getX());
+            vertexData.push_back(n.getY());
+            vertexData.push_back(n.getZ());
+            // Color (location 2)
             vertexData.push_back(0.6f); vertexData.push_back(0.6f); vertexData.push_back(0.7f);
+            // TexCoord (location 3)
             if (i < mesh.texCoords.size()) {
                 vertexData.push_back(mesh.texCoords[i].getX());
                 vertexData.push_back(mesh.texCoords[i].getY());
@@ -51,12 +68,16 @@ public:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices.size() * sizeof(unsigned short), mesh.indices.data(), GL_STATIC_DRAW);
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        // Layout: 3 pos + 3 normal + 3 color + 2 texCoord = 11 floats, 44 bytes
+        const GLsizei stride = 11 * sizeof(float);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, stride, (void*)(9 * sizeof(float)));
+        glEnableVertexAttribArray(3);
 
         glBindVertexArray(0);
 
@@ -78,9 +99,7 @@ public:
         glUniformMatrix4fv(viewLoc, 1, GL_TRUE, view.mat.data());
         glUniformMatrix4fv(projLoc, 1, GL_TRUE, proj.mat.data());
 
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
-        glBindVertexArray(0);
+        drawRaw(shaderProgram);
     }
 
     void moveX(float delta) { position.x += delta; }
@@ -126,30 +145,12 @@ public:
         if (EBO) glDeleteBuffers(1, &EBO);
     }
 
-private:
-    unsigned int VAO = 0, VBO = 0, EBO = 0;
-    int indexCount = 0;
-    bool m_loaded = false;
-
-    float computeSize(const Mesh3DS& mesh) {
-        if (mesh.vertices.empty()) return 1.0f;
-        float minX = mesh.vertices[0].getX(), maxX = minX;
-        float minY = mesh.vertices[0].getY(), maxY = minY;
-        float minZ = mesh.vertices[0].getZ(), maxZ = minZ;
-        for (const auto& v : mesh.vertices) {
-            if (v.getX() < minX) minX = v.getX();
-            if (v.getX() > maxX) maxX = v.getX();
-            if (v.getY() < minY) minY = v.getY();
-            if (v.getY() > maxY) maxY = v.getY();
-            if (v.getZ() < minZ) minZ = v.getZ();
-            if (v.getZ() > maxZ) maxZ = v.getZ();
-        }
-        float dx = maxX - minX;
-        float dy = maxY - minY;
-        float dz = maxZ - minZ;
-        float maxDim = dx > dy ? dx : dy;
-        maxDim = maxDim > dz ? maxDim : dz;
-        return maxDim > 0.0f ? maxDim : 1.0f;
+    // Draw with matrices pre-uploaded by caller (for lighting normal matrix support)
+    void drawRaw(unsigned int shaderProgram) {
+        if (!m_loaded) return;
+        glBindVertexArray(VAO);
+        glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_SHORT, 0);
+        glBindVertexArray(0);
     }
 
     // Construye la matriz modelo: T(posicion) × Ry(yaw) × Rx(pitch) × CorreccionModelo
@@ -179,7 +180,6 @@ private:
             0.0f,  sp,     cp,    0.0f,
             0.0f,  0.0f,   0.0f,  1.0f
         };
-
         model.multMat(rxPitch);
 
         // Correccion del modelo 3DS: Rz(180°) × Rx(90°)
@@ -196,6 +196,30 @@ private:
 
         return model;
     }
+
+private:
+    float computeSize(const Mesh3DS& mesh) {
+        if (mesh.vertices.empty()) return 1.0f;
+        float minX = mesh.vertices[0].getX(), maxX = minX;
+        float minY = mesh.vertices[0].getY(), maxY = minY;
+        float minZ = mesh.vertices[0].getZ(), maxZ = minZ;
+        for (const auto& v : mesh.vertices) {
+            if (v.getX() < minX) minX = v.getX();
+            if (v.getX() > maxX) maxX = v.getX();
+            if (v.getY() < minY) minY = v.getY();
+            if (v.getY() > maxY) maxY = v.getY();
+            if (v.getZ() < minZ) minZ = v.getZ();
+            if (v.getZ() > maxZ) maxZ = v.getZ();
+        }
+        float dx = maxX - minX;
+        float dy = maxY - minY;
+        float dz = maxZ - minZ;
+        float maxDim = dx > dy ? dx : dy;
+        maxDim = maxDim > dz ? maxDim : dz;
+        return maxDim > 0.0f ? maxDim : 1.0f;
+    }
+
+
 };
 
 #endif // SPACESHIP_H_

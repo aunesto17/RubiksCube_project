@@ -50,7 +50,7 @@ public:
     }
 
     // plus equal operator
-    vec3 operator+=(vec3 & v)
+    vec3 operator+=(const vec3 & v)
     {
         x += v.x;
         y += v.y;

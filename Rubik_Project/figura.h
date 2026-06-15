@@ -16,6 +16,7 @@ public:
     std::vector<vec3> vertices;
     std::vector<vec3> verticesOrig; // to reset fig
     std::vector<vec3> vertexColors;
+    std::vector<vec3> vertexNormals;
     std::vector<vec2> vertexTexCoords;
 
     std::vector<unsigned int> VAOs; // Vertex Array Object
@@ -181,67 +182,88 @@ public:
 
     void setupBuffers() override {
         const std::vector<vec2> texCoords = {
-            vec2(0.0f, 0.0f), vec2(1.0f, 0.0f), vec2(1.0f, 1.0f), 
+            vec2(0.0f, 0.0f), vec2(1.0f, 0.0f), vec2(1.0f, 1.0f),
             vec2(1.0f, 1.0f), vec2(0.0f, 1.0f), vec2(0.0f, 0.0f)
+        };
+        // Face normals: UP(+Y), LEFT(-X), FRONT(+Z), RIGHT(+X), BACK(-Z), DOWN(-Y)
+        const std::vector<vec3> faceNormals = {
+            vec3(0.0f,  1.0f,  0.0f), vec3(-1.0f, 0.0f,  0.0f), vec3(0.0f, 0.0f,  1.0f),
+            vec3(1.0f,  0.0f,  0.0f), vec3(0.0f,  0.0f, -1.0f), vec3(0.0f,-1.0f,  0.0f)
         };
 
         std::vector<float> vertexData;
         vertexColors.clear();
+        vertexNormals.clear();
         vertexTexCoords.clear();
 
         for (size_t face = 0; face < 6; face++) {
             for (size_t v = 0; v < 6; v++) {
                 size_t vertexIndex = face * 6 + v;
-                
-                // Position
+                // Position (location 0)
                 vertexData.push_back(vertices[vertexIndex].getX());
                 vertexData.push_back(vertices[vertexIndex].getY());
                 vertexData.push_back(vertices[vertexIndex].getZ());
-                
-                // Color and texture based on active faces
+                // Normal (location 1)
+                vertexData.push_back(faceNormals[face].getX());
+                vertexData.push_back(faceNormals[face].getY());
+                vertexData.push_back(faceNormals[face].getZ());
+                // Color (location 2) and TexCoord (location 3)
                 if(!activeFaces[face]) {
                     vertexData.push_back(0.2f); vertexData.push_back(0.2f); vertexData.push_back(0.2f);
                     vertexData.push_back(0.0f); vertexData.push_back(0.0f);
                     vertexColors.push_back(vec3(0.2f, 0.2f, 0.2f));
+                    vertexNormals.push_back(faceNormals[face]);
                     vertexTexCoords.push_back(vec2(0.0f, 0.0f));
                 } else {
                     const vec3& color = defaultColors[face];
                     vertexData.push_back(color.getX()); vertexData.push_back(color.getY()); vertexData.push_back(color.getZ());
                     vertexData.push_back(texCoords[v].getX()); vertexData.push_back(texCoords[v].getY());
                     vertexColors.push_back(color);
+                    vertexNormals.push_back(faceNormals[face]);
                     vertexTexCoords.push_back(texCoords[v]);
                 }
             }
         }
-        
+
         VAOs.resize(1);
         VBOs.resize(1);
         glGenVertexArrays(1, &VAOs[0]);
         glGenBuffers(1, &VBOs[0]);
-        
+
         glBindVertexArray(VAOs[0]);
         glBindBuffer(GL_ARRAY_BUFFER, VBOs[0]);
-        glBufferData(GL_ARRAY_BUFFER, vertexData.size() * sizeof(float), &vertexData[0], GL_DYNAMIC_DRAW); // Changed to DYNAMIC_DRAW
-        
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        glBufferData(GL_ARRAY_BUFFER, vertexData.size() * sizeof(float), &vertexData[0], GL_DYNAMIC_DRAW);
+
+        // Layout: 3 pos + 3 normal + 3 color + 2 texCoord = 11 floats (44 bytes)
+        GLsizei stride = 11 * sizeof(float);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, (void*)(6 * sizeof(float)));
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, stride, (void*)(9 * sizeof(float)));
+        glEnableVertexAttribArray(3);
     }
 
     void updateBuffers() override {
         glBindBuffer(GL_ARRAY_BUFFER, VBOs[0]);
         std::vector<float> vertexData;
-        
+
         for (size_t i = 0; i < vertices.size(); i++) {
+            // Position
             vertexData.push_back(vertices[i].getX());
             vertexData.push_back(vertices[i].getY());
             vertexData.push_back(vertices[i].getZ());
+            // Normal
+            vertexData.push_back(vertexNormals[i].getX());
+            vertexData.push_back(vertexNormals[i].getY());
+            vertexData.push_back(vertexNormals[i].getZ());
+            // Color
             vertexData.push_back(vertexColors[i].getX());
             vertexData.push_back(vertexColors[i].getY());
             vertexData.push_back(vertexColors[i].getZ());
+            // TexCoord
             vertexData.push_back(vertexTexCoords[i].getX());
             vertexData.push_back(vertexTexCoords[i].getY());
         }
