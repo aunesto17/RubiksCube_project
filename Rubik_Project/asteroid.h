@@ -13,6 +13,9 @@ public:
     vec3 direction{0.0f, 0.0f, 0.0f};
     float speed = 4.5f;
     float scale = 1.0f;
+    float collisionRadius = 0.0f;
+    int hitPoints = 1;
+    int maxHitPoints = 1;
     
     // Variables de rotación interna para que el asteroide gire sobre sí mismo
     float rotX = 0.0f, rotY = 0.0f, rotZ = 0.0f;
@@ -23,6 +26,7 @@ public:
     static unsigned int sharedVAO, sharedVBO, sharedEBO;
     static int sharedIndexCount;
     static bool isMeshLoaded;
+    static float sharedHalfExtent;
 
     // Inicializador de la malla base (se llama UNA SÓLA VEZ en el main)
     static bool loadMesh(const char* filepath) {
@@ -40,7 +44,8 @@ public:
         }
         float maxDim = (maxX - minX) > (maxY - minY) ? (maxX - minX) : (maxY - minY);
         maxDim = maxDim > (maxZ - minZ) ? maxDim : (maxZ - minZ);
-        
+        sharedHalfExtent = maxDim * 0.5f;
+
         float baseScale = 1.5f / maxDim;
 
         // Compute per-vertex normals from face normals
@@ -134,7 +139,21 @@ public:
         rotSpeedX = ((float)(rand() % 100) / 100.0f) * 2.0f;
         rotSpeedY = ((float)(rand() % 100) / 100.0f) * 2.0f;
         rotSpeedZ = ((float)(rand() % 100) / 100.0f) * 2.0f;
+
+        // Radio de colision basado en el tamano real del modelo en world space
+        // escalaFinal = scale * 0.001 (escalaCorrectiva del getModelMatrix)
+        collisionRadius = scale * 0.001f * sharedHalfExtent;
+
+        // Puntos de vida basados en el tamano: small(0.5)=1HP, med(1.0)=2HP, large(1.5)=3HP
+        hitPoints = static_cast<int>(scale * 2.0f);
+        if (hitPoints < 1) hitPoints = 1;
+        maxHitPoints = hitPoints;
     }
+
+    float getCollisionRadius() const { return collisionRadius; }
+
+    void takeDamage(int damage) { hitPoints -= damage; }
+    bool isDestroyed() const { return hitPoints <= 0; }
 
     // Actualiza la posición y las rotaciones internas basándose en el DeltaTime
     void update(float deltaTime) {
@@ -187,5 +206,6 @@ unsigned int Asteroid::sharedVBO = 0;
 unsigned int Asteroid::sharedEBO = 0;
 int Asteroid::sharedIndexCount = 0;
 bool Asteroid::isMeshLoaded = false;
+float Asteroid::sharedHalfExtent = 0.0f;
 
 #endif // ASTEROID_H_
