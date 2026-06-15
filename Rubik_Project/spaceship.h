@@ -88,6 +88,7 @@ public:
     void moveZ(float delta) { position.z += delta; }
     void setPosition(const vec3& pos) { position = pos; }
     vec3 getPosition() const { return position; }
+    float getCollisionRadius() const { return collisionRadius; }
 
     // Calcula la direccion hacia adelante en world usando yaw y pitch
     vec3 getForward() const {
@@ -130,6 +131,7 @@ private:
     unsigned int VAO = 0, VBO = 0, EBO = 0;
     int indexCount = 0;
     bool m_loaded = false;
+    float collisionRadius = 0.5f;
 
     float computeSize(const Mesh3DS& mesh) {
         if (mesh.vertices.empty()) return 1.0f;
@@ -149,6 +151,7 @@ private:
         float dz = maxZ - minZ;
         float maxDim = dx > dy ? dx : dy;
         maxDim = maxDim > dz ? maxDim : dz;
+        collisionRadius = maxDim > 0.0f ? (maxDim * 0.5f * (1.0f / maxDim)) : 0.5f;
         return maxDim > 0.0f ? maxDim : 1.0f;
     }
 

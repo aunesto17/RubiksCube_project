@@ -126,6 +126,14 @@ static inline matriz4x4 getRotationMatrix(char face, float angle) {
     return rotAxisAngle(axis, radians(angle) );
 }
 
+// Deteccion de colision esfera-esfera (usa distancia al cuadrado para evitar sqrt)
+static inline bool checkSphereCollision(const vec3& posA, float radiusA,
+                                        const vec3& posB, float radiusB) {
+    vec3 diff = posA - posB;
+    float distSq = dotProduct(diff, diff);
+    float radiusSum = radiusA + radiusB;
+    return distSq < (radiusSum * radiusSum);
+}
 
 
 } // namespace helper

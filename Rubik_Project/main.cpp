@@ -18,6 +18,7 @@ main_final_unificado.cpp
 #include "spaceship.h"
 #include "blackhole.h"
 #include "asteroid.h"
+#include "bullet.h"
 
 #include <vector>
 #include <cstdlib> // Para rand() y srand()
@@ -27,6 +28,19 @@ std::vector<Asteroid> listaAsteroides;
 float tiempoUltimoAsteroide = 0.0f;
 float frecuenciaSpawn = 1.5f; // Generar un asteroide cada 1.5 segundos
 unsigned int asteroideTexID;  // ID para la textura de los asteroides
+
+// VARIABLES GLOBALES - ESTADO DEL JUEGO
+int vidas = 3;
+bool gameOver = bool(false);
+float invincibleTimer = 0.0f;   // tiempo restante de invencibilidad tras un golpe (segundos)
+const float INVINCIBLE_DURATION = 2.0f;  // duracion de invencibilidad post-golpe
+int asteroidesDestruidos = 0;   // contador de asteroides que pasaron la nave (score basico)
+
+// VARIABLES GLOBALES - SISTEMA DE BALAS (SHOOTING)
+std::vector<Bullet> listaBalas;
+float tiempoUltimoDisparo = 0.0f;
+const float FIRE_RATE = 0.15f; // segundos entre disparos
+unsigned int bulletTexID;      // textura 1x1 transparente para que el shader use vertex color
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height); //dimensionar la pantalla
 
@@ -79,6 +93,13 @@ GLenum currentDrawMode = GL_TRIANGLES;
 
 // Continuous input polling — runs every frame
 void processInput(GLFWwindow* window);
+
+// Funciones del juego (definidas despues de main)
+void handleShooting(GLFWwindow* window, float currentFrame);
+void updateBullets(float deltaTime);
+void spawnAsteroids(float currentFrame);
+void processAsteroids(float deltaTime, unsigned int shaderProgram);
+void drawBullets(unsigned int shaderProgram);
 
 // vertex shader basico con textura
 const char *vertexShaderSource = "#version 330 core\n"
@@ -177,6 +198,17 @@ int main()
     asteroideTexID = loadTexture("assets/asteroide.jpg");
     Asteroid::loadMesh("assets/asteroide.3ds");
 
+    // Crear textura 1x1 transparente para las balas (el shader usa vertex color cuando alpha < 0.1)
+    unsigned char transparentPixel[] = {0, 0, 0, 0};
+    glGenTextures(1, &bulletTexID);
+    glBindTexture(GL_TEXTURE_2D, bulletTexID);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, transparentPixel);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Inicializar malla compartida de las balas (esfera UV)
+    Bullet::initMesh(1.0f);
+
     // Inicializar Agujero Negro (Reemplaza al Skybox estándar)
     BlackHole blackhole;
     blackhole.init();
@@ -232,8 +264,16 @@ int main()
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
+        // Actualizar temporizador de invencibilidad
+        if (invincibleTimer > 0.0f) {
+            invincibleTimer -= deltaTime;
+        }
+
         // Captura de controles continuos (Cámara Orbital, Nave y Rotación del Cubo)
         processInput(window); 
+
+        // DISPARO DE BALAS (Click Izquierdo del Mouse)
+        handleShooting(window, currentFrame);
 
         // Listener de eventos discretos (Teclas de control del Cubo)
         glfwSetKeyCallback(window, key_callback);
@@ -284,37 +324,11 @@ int main()
         glBindTexture(GL_TEXTURE_2D, ourTextureID);  
         cuboRubik->draw(shaderProgram);
 
-        // GENERACIÓN DINÁMICA DE ASTEROIDES
-        if (currentFrame - tiempoUltimoAsteroide > frecuenciaSpawn) {
-            float spawnX = ((float)(rand() % 40) - 20.0f); 
-            float spawnY = ((float)(rand() % 20) - 10.0f); 
-            vec3 puntoOrigen(spawnX, spawnY, -50.0f); // Nacen al fondo
-
-            vec3 puntoDestino = spaceship.getPosition(); // Su objetivo es interceptar la nave
-            float tamanoAleatorio = 1.0f;
-
-            Asteroid nuevoAsteroide(puntoOrigen, puntoDestino, tamanoAleatorio);
-            listaAsteroides.push_back(nuevoAsteroide);
-
-            tiempoUltimoAsteroide = currentFrame; 
-        }
-
-        // ACTUALIZACIÓN Y RENDERIZADO DE LOS ASTEROIDES
-        glUniform1i(ourTextureLoc, 0); 
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, asteroideTexID); // Textura de roca espacial activa
-
-        for (size_t i = 0; i < listaAsteroides.size(); ) {
-            listaAsteroides[i].update(deltaTime);
-            listaAsteroides[i].draw(shaderProgram);
-
-            // Si el asteroide ya rebasó la nave, se elimina para optimizar recursos
-            if (listaAsteroides[i].position.z > 2.0f) {
-                listaAsteroides.erase(listaAsteroides.begin() + i);
-            } else {
-                i++; 
-            }
-        }
+        // ACTUALIZACION Y RENDERIZADO DE OBJETOS DEL JUEGO
+        updateBullets(deltaTime);
+        spawnAsteroids(currentFrame);
+        processAsteroids(deltaTime, shaderProgram);
+        drawBullets(shaderProgram);
 
         // RENDERIZADO DE LA NAVE JUGADORA
         glUniform1i(ourTextureLoc, 0); 
@@ -339,6 +353,25 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
+
+    // Reiniciar juego
+    bool gameReset = false;
+    if (key == GLFW_KEY_R && action == GLFW_PRESS) {
+        if (gameOver || vidas < 3) {
+            vidas = 3;
+            gameOver = false;
+            invincibleTimer = 0.0f;
+            asteroidesDestruidos = 0;
+            listaAsteroides.clear();
+            listaBalas.clear();
+            tiempoUltimoDisparo = 0.0f;
+            spaceship.setPosition(vec3(0.0f, 0.0f, -10.0f));
+            spaceship.yaw = 0.0f;
+            spaceship.pitch = 0.0f;
+            gameReset = true;
+            std::cout << "[JUEGO] Reiniciado. Vidas: 3" << std::endl;
+        }
+    }
     
     if (key == GLFW_KEY_TAB && action == GLFW_PRESS) {
         isClockwise = !isClockwise;
@@ -348,7 +381,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     // Control de Capas de Rubik
     if (!cuboRubik->is_animation_running() && !cuboRubik->isSequenceRunning()) {
         if (key == GLFW_KEY_T && action == GLFW_PRESS) cuboRubik->rotateU(isClockwise);
-        if (key == GLFW_KEY_R && action == GLFW_PRESS) cuboRubik->rotateL(isClockwise); 
+        if (key == GLFW_KEY_R && action == GLFW_PRESS && !gameReset) cuboRubik->rotateL(isClockwise); 
         if (key == GLFW_KEY_F && action == GLFW_PRESS) cuboRubik->rotateF(isClockwise); 
         if (key == GLFW_KEY_G && action == GLFW_PRESS) cuboRubik->rotateR(isClockwise); 
         if (key == GLFW_KEY_Y && action == GLFW_PRESS) cuboRubik->rotateB(isClockwise); 
@@ -405,6 +438,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 // Entrada continua (Acciones fluidas por frame)
 void processInput(GLFWwindow* window) {
+    if (gameOver) return; // No permitir movimiento si el juego termino
     // Si NO estamos siguiendo la nave, las teclas WASD controlan el modo orbital libre
     if (!camera.isFollowMode()) {
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.moveForward(deltaTime);
@@ -431,8 +465,141 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) cuboRubik->rotarCuboGlobalY(ang);
 }
 
+// =========================================================================
+// FUNCIONES DEL SISTEMA DE JUEGO (Shooting, Balas, Asteroides, Colisiones)
+// =========================================================================
+
+// Manejo de disparo dual desde la cabina de la nave
+void handleShooting(GLFWwindow* window, float currentFrame) {
+    if (gameOver) return;
+    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) != GLFW_PRESS) return;
+    if (currentFrame - tiempoUltimoDisparo <= FIRE_RATE) return;
+
+    vec3 fwd = spaceship.getForward();
+    vec3 right = spaceship.getRight();
+    vec3 pos = spaceship.getPosition();
+
+    vec3 leftBarrel  = pos + fwd * 0.5f + right * 0.2f;
+    vec3 rightBarrel = pos + fwd * 0.5f - right * 0.2f;
+
+    listaBalas.push_back(Bullet(leftBarrel, fwd));
+    listaBalas.push_back(Bullet(rightBarrel, fwd));
+    tiempoUltimoDisparo = currentFrame;
+}
+
+// Actualizar posiciones de balas y eliminar las que expiran
+void updateBullets(float deltaTime) {
+    for (size_t i = 0; i < listaBalas.size(); ) {
+        listaBalas[i].update(deltaTime);
+        if (listaBalas[i].isExpired()) {
+            listaBalas.erase(listaBalas.begin() + i);
+        } else {
+            i++;
+        }
+    }
+}
+
+// Generar asteroides aleatorios con tamaños variables y velocidad escalada
+void spawnAsteroids(float currentFrame) {
+    if (currentFrame - tiempoUltimoAsteroide <= frecuenciaSpawn) return;
+
+    float spawnX = ((float)(rand() % 40) - 20.0f);
+    float spawnY = ((float)(rand() % 20) - 10.0f);
+    vec3 puntoOrigen(spawnX, spawnY, -50.0f);
+    vec3 puntoDestino = spaceship.getPosition();
+
+    // Tamano aleatorio: 30% small (0.5), 50% med (1.0), 20% large (1.5)
+    float sizeRoll = (float)(rand() % 100) / 100.0f;
+    float tamanoAleatorio;
+    if (sizeRoll < 0.3f)      tamanoAleatorio = 0.5f;
+    else if (sizeRoll < 0.8f) tamanoAleatorio = 1.0f;
+    else                      tamanoAleatorio = 1.5f;
+
+    Asteroid nuevoAsteroide(puntoOrigen, puntoDestino, tamanoAleatorio);
+    nuevoAsteroide.speed = 4.5f / tamanoAleatorio;
+    listaAsteroides.push_back(nuevoAsteroide);
+
+    tiempoUltimoAsteroide = currentFrame;
+}
+
+// Actualizar, dibujar y gestionar colisiones de todos los asteroides
+void processAsteroids(float deltaTime, unsigned int shaderProgram) {
+    glUniform1i(ourTextureLoc, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, asteroideTexID);
+
+    for (size_t i = 0; i < listaAsteroides.size(); ) {
+        listaAsteroides[i].update(deltaTime);
+        listaAsteroides[i].draw(shaderProgram);
+
+        bool removed = false;
+
+        // Colision nave-asteroide
+        if (!gameOver && invincibleTimer <= 0.0f) {
+            if (helper::checkSphereCollision(
+                    spaceship.getPosition(), spaceship.getCollisionRadius(),
+                    listaAsteroides[i].position, listaAsteroides[i].getCollisionRadius())) {
+                vidas--;
+                std::cout << "[COLISION] Impacto! Vidas restantes: " << vidas << std::endl;
+                invincibleTimer = INVINCIBLE_DURATION;
+                listaAsteroides.erase(listaAsteroides.begin() + i);
+                removed = true;
+                if (vidas <= 0) {
+                    gameOver = true;
+                    std::cout << "========================================" << std::endl;
+                    std::cout << "  GAME OVER - Has perdido todas las vidas" << std::endl;
+                    std::cout << "  Presiona R para reiniciar" << std::endl;
+                    std::cout << "========================================" << std::endl;
+                }
+            }
+        }
+
+        // Colision bala-asteroide
+        if (!removed) {
+            for (size_t j = 0; j < listaBalas.size(); ) {
+                if (helper::checkSphereCollision(
+                        listaBalas[j].position, listaBalas[j].getCollisionRadius(),
+                        listaAsteroides[i].position, listaAsteroides[i].getCollisionRadius())) {
+                    listaAsteroides[i].takeDamage(1);
+                    listaBalas.erase(listaBalas.begin() + j);
+                    if (listaAsteroides[i].isDestroyed()) {
+                        asteroidesDestruidos++;
+                        std::cout << "[DISPARO] Asteroide destruido! HP: " << listaAsteroides[i].maxHitPoints << std::endl;
+                        listaAsteroides.erase(listaAsteroides.begin() + i);
+                        removed = true;
+                    }
+                    break;
+                } else {
+                    j++;
+                }
+            }
+        }
+
+        // Eliminar asteroides fuera de rango
+        if (!removed) {
+            if (listaAsteroides[i].position.z > 2.0f) {
+                asteroidesDestruidos++;
+                listaAsteroides.erase(listaAsteroides.begin() + i);
+            } else {
+                i++;
+            }
+        }
+    }
+}
+
+// Dibujar todas las balas activas con textura transparente (vertex color)
+void drawBullets(unsigned int shaderProgram) {
+    glUniform1i(ourTextureLoc, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, bulletTexID);
+    for (auto& b : listaBalas) {
+        b.draw(shaderProgram);
+    }
+}
+
 // Callback del mouse: controla hacia dónde mira la cabina de tu nave espacial
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (gameOver) return; // No permitir rotacion si el juego termino
     float xf = (float)xpos;
     float yf = (float)ypos;
 
