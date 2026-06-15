@@ -8,7 +8,7 @@
 class Spaceship {
 public:
     vec3 position{0.0f, 0.0f, 0.0f};
-    float scale = 1.0f;
+    float scale = 0.25f;
     float yaw = 0.0f;   // rotacion horizontal (grados), positivo = girar a la izquierda
     float pitch = 0.0f; // rotacion vertical (grados), positivo = nariz hacia arriba
 
@@ -17,7 +17,7 @@ public:
         if (!Load3DS(mesh, filepath)) return false;
 
         float size = computeSize(mesh);
-        scale =1.0f / size;
+        scale = 1.0f / size;
         std::cout << "[Spaceship] Auto-scale: " << scale << " (model size: " << size << ")" << std::endl;
 
         std::vector<float> vertexData;
@@ -89,7 +89,7 @@ public:
     void setPosition(const vec3& pos) { position = pos; }
     vec3 getPosition() const { return position; }
 
-    // Calcula la direccion hacia adelante en espacio mundo usando yaw y pitch
+    // Calcula la direccion hacia adelante en world usando yaw y pitch
     vec3 getForward() const {
         float yawRad = helper::toRadians(yaw);
         float pitchRad = helper::toRadians(pitch);
@@ -104,7 +104,7 @@ public:
         return vec3(std::cos(yawRad), 0.0f, -std::sin(yawRad));
     }
 
-    // Mueve la nave hacia adelante en la direccion que apunta el cockpit
+    // Mueve la nave hacia adelante en la direccion que apunta la punta de la nave
     void moveForward(float step) {
         vec3 fwd = getForward();
         position.x += fwd.x * step;
@@ -112,7 +112,7 @@ public:
         position.z += fwd.z * step;
     }
 
-    // Mueve la nave hacia atras (direccion opuesta al cockpit)
+    // Mueve la nave hacia atras (direccion opuesta a la punta de la nave)
     void moveBackward(float step) {
         vec3 fwd = getForward();
         position.x -= fwd.x * step;

@@ -73,7 +73,7 @@ private:
     float followHeight = 3.0f;        // altura sobre la nave
     float followSmoothing = 5.0f;     // velocidad de suavizado (mayor = mas rapido)
     vec3 smoothedEyePos;              // posicion suavizada de la camara (interpola)
-    bool followInitialized = false;   // bandera para inicializar la posicion suavizada
+    bool followInitialized = false;   // flag para inicializar la posicion suavizada
 
     // --- Validation Helpers ---
     void clampPitchWithWarning(float& pitchValue) const {
