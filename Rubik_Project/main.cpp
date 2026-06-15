@@ -524,6 +524,8 @@ void spawnAsteroids(float currentFrame) {
 
 // Actualizar, dibujar y gestionar colisiones de todos los asteroides
 void processAsteroids(float deltaTime, unsigned int shaderProgram) {
+	GLint ourTextureLoc =
+    glGetUniformLocation(shaderProgram, "ourTexture");
     glUniform1i(ourTextureLoc, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, asteroideTexID);
@@ -589,6 +591,8 @@ void processAsteroids(float deltaTime, unsigned int shaderProgram) {
 
 // Dibujar todas las balas activas con textura transparente (vertex color)
 void drawBullets(unsigned int shaderProgram) {
+	GLint ourTextureLoc =
+    glGetUniformLocation(shaderProgram, "ourTexture");
     glUniform1i(ourTextureLoc, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, bulletTexID);
