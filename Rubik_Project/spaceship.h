@@ -14,20 +14,42 @@ public:
 
     bool load(const char* filepath) {
         Mesh3DS mesh;
-        if (!Load3DS(mesh, filepath)) return false;
+        if (!Load3DS(mesh, filepath)) {
+            std::cerr << "[Spaceship] ERROR: Failed to load mesh from " << filepath << std::endl;
+            return false;
+        }
 
         float size = computeSize(mesh);
         scale = 1.0f / size;
         std::cout << "[Spaceship] Auto-scale: " << scale << " (model size: " << size << ")" << std::endl;
 
+        // Compute per-vertex normals from the mesh geometry
+        std::vector<vec3> normals = helper::compute_normals(mesh.vertices, mesh.indices);
+        if (normals.empty()) {
+            std::cerr << "[Spaceship] WARNING: Computed normals are empty. Using fallback normals." << std::endl;
+            normals.resize(mesh.vertices.size(), vec3(0.0f, 0.0f, 1.0f));
+        }
+
         std::vector<float> vertexData;
-        vertexData.reserve(mesh.vertices.size() * 8);
+        vertexData.reserve(mesh.vertices.size() * 11);
         for (size_t i = 0; i < mesh.vertices.size(); i++) {
             const vec3& v = mesh.vertices[i];
+            const vec3& n = normals[i];
+
+            // Position (location 0)
             vertexData.push_back(v.getX());
             vertexData.push_back(v.getY());
             vertexData.push_back(v.getZ());
+
+            // Normal (location 1)
+            vertexData.push_back(n.getX());
+            vertexData.push_back(n.getY());
+            vertexData.push_back(n.getZ());
+
+            // Color (location 2)
             vertexData.push_back(0.6f); vertexData.push_back(0.6f); vertexData.push_back(0.7f);
+
+            // TexCoord (location 3)
             if (i < mesh.texCoords.size()) {
                 vertexData.push_back(mesh.texCoords[i].getX());
                 vertexData.push_back(mesh.texCoords[i].getY());
@@ -51,12 +73,15 @@ public:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices.size() * sizeof(unsigned short), mesh.indices.data(), GL_STATIC_DRAW);
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        // New layout: position(3) + normal(3) + color(3) + texCoord(2) = 11 floats, stride = 44 bytes
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float)));
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(9 * sizeof(float)));
+        glEnableVertexAttribArray(3);
 
         glBindVertexArray(0);
 
@@ -71,10 +96,13 @@ public:
         glUseProgram(shaderProgram);
 
         matriz4x4 model = getModelMatrix();
+        std::array<float, 9> normalMat = helper::extract_normal_matrix(model);
         GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
+        GLint normalMatrixLoc = glGetUniformLocation(shaderProgram, "normalMatrix");
         GLint viewLoc = glGetUniformLocation(shaderProgram, "view");
         GLint projLoc = glGetUniformLocation(shaderProgram, "projection");
         glUniformMatrix4fv(modelLoc, 1, GL_TRUE, model.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, normalMat.data());
         glUniformMatrix4fv(viewLoc, 1, GL_TRUE, view.mat.data());
         glUniformMatrix4fv(projLoc, 1, GL_TRUE, proj.mat.data());
 
@@ -155,6 +183,7 @@ private:
         return maxDim > 0.0f ? maxDim : 1.0f;
     }
 
+public:
     // Construye la matriz modelo: T(posicion) × Ry(yaw) × Rx(pitch) × CorreccionModelo
     // CorreccionModelo transforma -Y del modelo (cockpit) a -Z (adelante en OpenGL)
     // y +Z del modelo (arriba) a +Y (arriba en OpenGL)

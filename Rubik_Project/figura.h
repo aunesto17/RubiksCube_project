@@ -181,8 +181,18 @@ public:
 
     void setupBuffers() override {
         const std::vector<vec2> texCoords = {
-            vec2(0.0f, 0.0f), vec2(1.0f, 0.0f), vec2(1.0f, 1.0f), 
+            vec2(0.0f, 0.0f), vec2(1.0f, 0.0f), vec2(1.0f, 1.0f),
             vec2(1.0f, 1.0f), vec2(0.0f, 1.0f), vec2(0.0f, 0.0f)
+        };
+
+        // Face normals: U:+Y, D:-Y, L:-X, R:+X, F:+Z, B:-Z
+        const std::vector<vec3> faceNormals = {
+            vec3(0.0f,  1.0f,  0.0f),  // UP (0)
+            vec3(-1.0f, 0.0f,  0.0f),  // LEFT (1)
+            vec3(0.0f,  0.0f,  1.0f),  // FRONT (2)
+            vec3(1.0f,  0.0f,  0.0f),  // RIGHT (3)
+            vec3(0.0f,  0.0f, -1.0f),  // BACK (4)
+            vec3(0.0f, -1.0f,  0.0f)   // DOWN (5)
         };
 
         std::vector<float> vertexData;
@@ -192,12 +202,17 @@ public:
         for (size_t face = 0; face < 6; face++) {
             for (size_t v = 0; v < 6; v++) {
                 size_t vertexIndex = face * 6 + v;
-                
-                // Position
+
+                // Position (location 0)
                 vertexData.push_back(vertices[vertexIndex].getX());
                 vertexData.push_back(vertices[vertexIndex].getY());
                 vertexData.push_back(vertices[vertexIndex].getZ());
-                
+
+                // Normal (location 1) - face normal for this face
+                vertexData.push_back(faceNormals[face].getX());
+                vertexData.push_back(faceNormals[face].getY());
+                vertexData.push_back(faceNormals[face].getZ());
+
                 // Color and texture based on active faces
                 if(!activeFaces[face]) {
                     vertexData.push_back(0.2f); vertexData.push_back(0.2f); vertexData.push_back(0.2f);
@@ -213,37 +228,57 @@ public:
                 }
             }
         }
-        
+
         VAOs.resize(1);
         VBOs.resize(1);
         glGenVertexArrays(1, &VAOs[0]);
         glGenBuffers(1, &VBOs[0]);
-        
+
         glBindVertexArray(VAOs[0]);
         glBindBuffer(GL_ARRAY_BUFFER, VBOs[0]);
-        glBufferData(GL_ARRAY_BUFFER, vertexData.size() * sizeof(float), &vertexData[0], GL_DYNAMIC_DRAW); // Changed to DYNAMIC_DRAW
-        
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        glBufferData(GL_ARRAY_BUFFER, vertexData.size() * sizeof(float), &vertexData[0], GL_DYNAMIC_DRAW);
+
+        // New layout: position(3) + normal(3) + color(3) + texCoord(2) = 11 floats, stride = 44 bytes
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float)));
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(9 * sizeof(float)));
+        glEnableVertexAttribArray(3);
     }
 
     void updateBuffers() override {
         glBindBuffer(GL_ARRAY_BUFFER, VBOs[0]);
         std::vector<float> vertexData;
-        
-        for (size_t i = 0; i < vertices.size(); i++) {
-            vertexData.push_back(vertices[i].getX());
-            vertexData.push_back(vertices[i].getY());
-            vertexData.push_back(vertices[i].getZ());
-            vertexData.push_back(vertexColors[i].getX());
-            vertexData.push_back(vertexColors[i].getY());
-            vertexData.push_back(vertexColors[i].getZ());
-            vertexData.push_back(vertexTexCoords[i].getX());
-            vertexData.push_back(vertexTexCoords[i].getY());
+
+        for (size_t face = 0; face < 6; face++) {
+            // Compute face normal from transformed vertices
+            // Each face has 6 vertices (2 triangles). Use first 3 to compute normal.
+            size_t baseIdx = face * 6;
+            vec3 e1 = vertices[baseIdx + 1] - vertices[baseIdx];
+            vec3 e2 = vertices[baseIdx + 2] - vertices[baseIdx];
+            vec3 faceNormal = helper::normalize(helper::crossProduct(e1, e2));
+
+            for (size_t v = 0; v < 6; v++) {
+                size_t i = baseIdx + v;
+                // Position (location 0)
+                vertexData.push_back(vertices[i].getX());
+                vertexData.push_back(vertices[i].getY());
+                vertexData.push_back(vertices[i].getZ());
+                // Normal (location 1) - recomputed from transformed geometry
+                vertexData.push_back(faceNormal.getX());
+                vertexData.push_back(faceNormal.getY());
+                vertexData.push_back(faceNormal.getZ());
+                // Color (location 2)
+                vertexData.push_back(vertexColors[i].getX());
+                vertexData.push_back(vertexColors[i].getY());
+                vertexData.push_back(vertexColors[i].getZ());
+                // TexCoord (location 3)
+                vertexData.push_back(vertexTexCoords[i].getX());
+                vertexData.push_back(vertexTexCoords[i].getY());
+            }
         }
         glBufferSubData(GL_ARRAY_BUFFER, 0, vertexData.size() * sizeof(float), &vertexData[0]);
     }

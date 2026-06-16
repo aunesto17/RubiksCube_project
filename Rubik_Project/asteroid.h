@@ -30,8 +30,11 @@ public:
 
     // Inicializador de la malla base (se llama UNA SÓLA VEZ en el main)
     static bool loadMesh(const char* filepath) {
-        Mesh3DS mesh; // Usando tu estructura de mallas actual
-        if (!Load3DS(mesh, filepath)) return false; // Reemplazar por tu cargador de .obj si difiere
+        Mesh3DS mesh;
+        if (!Load3DS(mesh, filepath)) {
+            std::cerr << "[Asteroid] ERROR: Failed to load mesh from " << filepath << std::endl;
+            return false;
+        }
 
         // Calcular tamaño base
         float minX = mesh.vertices[0].getX(), maxX = minX;
@@ -46,46 +49,51 @@ public:
         maxDim = maxDim > (maxZ - minZ) ? maxDim : (maxZ - minZ);
         sharedHalfExtent = maxDim * 0.5f;
 
-        float baseScale = 1.5f / maxDim;
+        // Compute per-vertex normals from the mesh geometry
+        std::vector<vec3> normals = helper::compute_normals(mesh.vertices, mesh.indices);
+        if (normals.empty()) {
+            std::cerr << "[Asteroid] WARNING: Computed normals are empty. Using fallback normals." << std::endl;
+            normals.resize(mesh.vertices.size(), vec3(0.0f, 0.0f, 1.0f));
+        }
 
         std::vector<float> vertexData;
-        vertexData.reserve(mesh.vertices.size() * 8);
+        vertexData.reserve(mesh.vertices.size() * 11);
         for (size_t i = 0; i < mesh.vertices.size(); i++) {
             const vec3& v = mesh.vertices[i];
-            
-            // 1. Posición (Atributo 0)
-            vertexData.push_back(v.getX()); 
-            vertexData.push_back(v.getY()); 
+            const vec3& n = normals[i];
+
+            // 1. Posicion (location 0)
+            vertexData.push_back(v.getX());
+            vertexData.push_back(v.getY());
             vertexData.push_back(v.getZ());
-            
-            // 2. Color por defecto (Atributo 1)
-            vertexData.push_back(0.6f); 
-            vertexData.push_back(0.6f); 
-            vertexData.push_back(0.7f); 
-            
-            // 3. Coordenadas de Textura (Atributo 2)
+
+            // 2. Normal (location 1) -- NEW
+            vertexData.push_back(n.getX());
+            vertexData.push_back(n.getY());
+            vertexData.push_back(n.getZ());
+
+            // 3. Color por defecto (location 2)
+            vertexData.push_back(0.6f);
+            vertexData.push_back(0.6f);
+            vertexData.push_back(0.7f);
+
+            // 4. Coordenadas de Textura (location 3)
             if (i < mesh.texCoords.size() && (mesh.texCoords[i].getX() != 0.0f || mesh.texCoords[i].getY() != 0.0f)) {
-                vertexData.push_back(mesh.texCoords[i].getX()); 
+                vertexData.push_back(mesh.texCoords[i].getX());
                 vertexData.push_back(mesh.texCoords[i].getY());
             } else {
-                // ¡Mapeo Esférico de Respaldo! 
-                // Usamos la dirección del vértice respecto al centro para envolver el asteroide como una pelota.
-                float length = sqrtf(v.getX()*v.getX() + v.getY()*v.getY() + v.getZ()*v.getZ());
-                
+                // Mapeo Esferico de Respaldo
+                float len = sqrtf(v.getX()*v.getX() + v.getY()*v.getY() + v.getZ()*v.getZ());
                 float u = 0.5f;
                 float v_tex = 0.5f;
-                
-                if (length > 0.0f) {
-                    float nx = v.getX() / length;
-                    float ny = v.getY() / length;
-                    float nz = v.getZ() / length;
-                    
-                    // Fórmulas matemáticas para convertir coordenadas 3D en un mapa 2D (U, V) entre 0 y 1
+                if (len > 0.0f) {
+                    float nx = v.getX() / len;
+                    float ny = v.getY() / len;
+                    float nz = v.getZ() / len;
                     u = 0.5f + (atan2f(nz, nx) / (2.0f * 3.141592f));
                     v_tex = 0.5f + (asinf(ny) / 3.141592f);
                 }
-                
-                vertexData.push_back(u); 
+                vertexData.push_back(u);
                 vertexData.push_back(v_tex);
             }
         }
@@ -103,20 +111,22 @@ public:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sharedEBO);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh.indices.size() * sizeof(unsigned short), mesh.indices.data(), GL_STATIC_DRAW);
 
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+        // New layout: position(3) + normal(3) + color(3) + texCoord(2) = 11 floats, stride = 44 bytes
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)0);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(3 * sizeof(float)));
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(6 * sizeof(float)));
         glEnableVertexAttribArray(2);
+        glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, 11 * sizeof(float), (void*)(9 * sizeof(float)));
+        glEnableVertexAttribArray(3);
 
         glBindVertexArray(0);
         isMeshLoaded = true;
-		
+
         return true;
     }
 
-    // Constructor para un asteroide individual con aleatoriedad
     Asteroid(vec3 startPos, vec3 targetPos, float sizeFactor) {
         position = startPos;
         scale = sizeFactor;
@@ -163,14 +173,17 @@ public:
         if (!isMeshLoaded) return;
 
         matriz4x4 model = getModelMatrix();
+        std::array<float, 9> normalMat = helper::extract_normal_matrix(model);
         GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
+        GLint normalMatrixLoc = glGetUniformLocation(shaderProgram, "normalMatrix");
         glUniformMatrix4fv(modelLoc, 1, GL_TRUE, model.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, normalMat.data());
 
         glBindVertexArray(sharedVAO);
         glDrawElements(GL_TRIANGLES, sharedIndexCount, GL_UNSIGNED_SHORT, 0);
     }
 
-private:
+public:
     matriz4x4 getModelMatrix() {
         matriz4x4 m;
         float cx = cosf(rotX), sx = sinf(rotX);
