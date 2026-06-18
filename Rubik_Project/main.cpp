@@ -1,4 +1,4 @@
-/*
+﻿/*
 UCSP
 COMPUTACION GRAFICA - 2026-I
 
@@ -19,6 +19,7 @@ main_final_unificado.cpp
 #include "blackhole.h"
 #include "asteroid.h"
 #include "bullet.h"
+#include "thruster.h"
 
 #include <vector>
 #include <array>   // Para std::array (normal matrices)
@@ -29,6 +30,8 @@ std::vector<Asteroid> listaAsteroides;
 float tiempoUltimoAsteroide = 0.0f;
 float frecuenciaSpawn = 1.5f; // Generar un asteroide cada 1.5 segundos
 unsigned int asteroideTexID;  // ID para la textura de los asteroides
+unsigned int ourTextureID;    // ID para la textura del Rubik
+unsigned int spaceshipTexID;  // ID para la textura de la nave
 
 // VARIABLES GLOBALES - ESTADO DEL JUEGO
 int vidas = 3;
@@ -66,8 +69,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height); //dim
 #define SCRAMBLE_NUM_MOVES      50
 
 // resolucion de la ventana
-const unsigned int SCR_WIDTH = 800;
-const unsigned int SCR_HEIGHT = 600;
+const unsigned int SCR_WIDTH = 1280;
+const unsigned int SCR_HEIGHT = 720;
 
 static void key_callback(GLFWwindow*, int, int, int, int);
 static void cursor_position_callback(GLFWwindow*, double, double); // callback del mouse: rota la nave
@@ -89,20 +92,83 @@ colorVec getRandomColor() {
 Camera camera;
 CuboRubik * cuboRubik = new CuboRubik(glfwGetTime(), camera);
 Spaceship spaceship;
+ThrusterEffect thrusterEffect;
 
 BlackHole blackhole;
+
+// =========================================================================
+// GAME MODE SYSTEM
+// =========================================================================
+enum GameMode { MODE_MENU, MODE_GAME };
+GameMode currentMode = MODE_MENU;
+
+// Menu mode parameters
+float menuOrbitAngle = 0.0f;
+const float MENU_ORBIT_SPEED = 15.0f;     // deg/s spaceship orbit
+const float MENU_ORBIT_RADIUS = 14.0f;    // distance from BH center
+float menuCameraOrbitAngle = 0.0f;
+const float MENU_CAMERA_ORBIT_SPEED = 8.0f; // deg/s camera orbit
+const float MENU_CAMERA_DISTANCE = 30.0f;
+const float MENU_CAMERA_PITCH = 35.264f;
+const float PIP_SIZE_RATIO = 0.30f;
+
+// Helper: upload lighting uniforms to the main shader
+void uploadLighting(unsigned int shaderProgram, const vec3& camPos) {
+    vec3 bhPos(blackhole.position[0], blackhole.position[1], blackhole.position[2]);
+    vec3 shipPos = spaceship.getPosition();
+
+    glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[0].position"),
+        bhPos.x, bhPos.y, bhPos.z);
+    glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[0].color"),
+        1.0f, 0.4f, 0.05f);
+    float distToBH = helper::length(shipPos - bhPos);
+    float proximityBoost = 1.0f + 5.0f * (1.0f / (1.0f + distToBH * 0.1f));
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].intensity"),
+        2.0f * proximityBoost);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].constant"), 1.0f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].linear"), 0.09f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].quadratic"), 0.032f);
+
+    glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[1].position"),
+        -50.0f, 30.0f, -20.0f);
+    glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[1].color"),
+        0.3f, 0.5f, 0.8f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].intensity"), 0.5f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].constant"), 1.0f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].linear"), 0.045f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].quadratic"), 0.0075f);
+
+    glUniform1i(glGetUniformLocation(shaderProgram, "numPointLights"), 2);
+    glUniform3f(glGetUniformLocation(shaderProgram, "viewPos"), camPos.x, camPos.y, camPos.z);
+}
 
 // VARIABLES GLOBALES DE CONTROL DE JUEGO por NIVELES
 int nivelActual = 1;
 float velocidadAsteroideBase = 7.0f; 
 
+// LIMITES DEL CORREDOR DE JUEGO (invisible wall)
+const float CORRIDOR_HALF_WIDTH = 6.0f;    // 12 unidades de ancho
+const float CORRIDOR_HALF_HEIGHT = 5.0f;   // 10 unidades de alto
+const float CORRIDOR_MIN_Z = -12.0f;       // 2 unidades detras de la posicion inicial
+const float CORRIDOR_MAX_Z = 95.0f;        // 5 unidades adelante del BH (Z=90)
+const float WIN_RADIUS = 10.0f;            // radio para ganar (mas grande que bhRadius)
+
+// Funcion para limitar la nave al corredor
+void clampShipToCorridor() {
+    vec3 shipPos = spaceship.getPosition();
+    shipPos.x = helper::clamp(shipPos.x, -CORRIDOR_HALF_WIDTH, CORRIDOR_HALF_WIDTH);
+    shipPos.y = helper::clamp(shipPos.y, -CORRIDOR_HALF_HEIGHT, CORRIDOR_HALF_HEIGHT);
+    shipPos.z = helper::clamp(shipPos.z, CORRIDOR_MIN_Z, CORRIDOR_MAX_Z);
+    spaceship.setPosition(shipPos);
+}
 // Función auxiliar para reiniciar el estado de la nave al cambiar de nivel o perder
 void resetPosicionNave() {
     spaceship.setPosition(vec3(0.0f, 0.0f, -10.0f));
-    spaceship.yaw = 0.0f;
+    spaceship.yaw = 180.0f;  // mira hacia +Z (hacia el BH)
     spaceship.pitch = 0.0f;
-    listaAsteroides.clear(); // Limpiar rocas viejas para evitar colisiones injustas
-    if (listaBalas.size() > 0) listaBalas.clear(); 
+    listaAsteroides.clear();
+    if (listaBalas.size() > 0) listaBalas.clear();
+    thrusterEffect.particles.clear();
 }
 
 void emitirExplosion(vec3 origen, float escalaAsteroide) {
@@ -136,31 +202,30 @@ void emitirExplosion(vec3 origen, float escalaAsteroide) {
     }
 }
 
-void processParticles(float deltaTime, unsigned int shaderProgram, GLint normalMatrixLoc) {
-    if (listaParticulas.empty()) return;
-
-    // 1. Avisar al shader que pinte un color plano sin textura si tiene la variable
-    GLint useTextureLoc = glGetUniformLocation(shaderProgram, "useTexture");
-    if (useTextureLoc != -1) glUniform1i(useTextureLoc, 0);
-
+void updateExplosionParticles(float deltaTime) {
     for (size_t i = 0; i < listaParticulas.size(); ) {
         listaParticulas[i].lifetime -= deltaTime;
-        
         if (listaParticulas[i].lifetime <= 0.0f) {
             listaParticulas.erase(listaParticulas.begin() + i);
             continue;
         }
-        
-        // Actualizar posición física
         listaParticulas[i].position.x += listaParticulas[i].velocity.x * deltaTime;
         listaParticulas[i].position.y += listaParticulas[i].velocity.y * deltaTime;
         listaParticulas[i].position.z += listaParticulas[i].velocity.z * deltaTime;
-        
-        // Factor de encogimiento (fade-out de tamaño)
+        i++;
+    }
+}
+
+void drawExplosionParticles(unsigned int shaderProgram, GLint normalMatrixLoc) {
+    if (listaParticulas.empty()) return;
+
+    GLint useTextureLoc = glGetUniformLocation(shaderProgram, "useTexture");
+    if (useTextureLoc != -1) glUniform1i(useTextureLoc, 0);
+
+    for (size_t i = 0; i < listaParticulas.size(); i++) {
         float factorVida = listaParticulas[i].lifetime / listaParticulas[i].maxLifetime;
         float escalaFinal = listaParticulas[i].size * factorVida;
-        
-        // Construcción manual de la matriz de modelado (Cubo posicionado y escalado)
+
         matriz4x4 modelMatrix;
         modelMatrix.mat = {
             escalaFinal, 0.0f,        0.0f,        listaParticulas[i].position.x,
@@ -168,34 +233,24 @@ void processParticles(float deltaTime, unsigned int shaderProgram, GLint normalM
             0.0f,        0.0f,        escalaFinal, listaParticulas[i].position.z,
             0.0f,        0.0f,        0.0f,        1.0f
         };
-        
-        // Inyectamos la matriz de modelado al shader
+
         glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_TRUE, modelMatrix.mat.data());
-        
-        // Hack de Iluminación/Color: Forzamos que el objeto brille ignorando las sombras
-        // Pasamos el color directamente a los coeficientes de reflexión difusa/ambiental si el shader los tiene
+
         GLint materialColorLoc = glGetUniformLocation(shaderProgram, "material.diffuse");
         if (materialColorLoc != -1) {
             glUniform3f(materialColorLoc, listaParticulas[i].color.x, listaParticulas[i].color.y, listaParticulas[i].color.z);
         }
 
-        // DIBUJAR: Reutilizamos el cubo del Rubik que sabemos que tu OpenGL renderiza perfectamente sin romperse
-        // Si tienes una variable VAO para el cubo o una clase Cubo, usa su bind aquí:
-        // En tu while usas: cuboRubik->draw(shaderProgram);
-        // Así que podemos forzar el dibujado usando la geometría que ya existe en el buffer:
-        cuboRubik->draw(shaderProgram); 
-        
-        i++;
+        cuboRubik->draw(shaderProgram);
     }
 
-    // Restaurar texturas para los siguientes objetos del juego
     if (useTextureLoc != -1) glUniform1i(useTextureLoc, 1);
 }
 
 // Función para actualizar las estadísticas según el nivel actual
 void actualizarDificultadNivel() {
     std::cout << "\n========================================" << std::endl;
-    std::cout << "        ¡BIENVENIDO AL NIVEL " << nivelActual << "! " << std::endl;
+    std::cout << "        Â¡BIENVENIDO AL NIVEL " << nivelActual << "! " << std::endl;
     
     switch(nivelActual) {
         case 1:
@@ -221,7 +276,7 @@ void actualizarDificultadNivel() {
         case 5:
             velocidadAsteroideBase = 22.0f;
             frecuenciaSpawn = 0.4f;
-            std::cout << "   Dificultad: ¡MODO IMPOSIBLE! (Lluvia masiva)" << std::endl;
+            std::cout << "   Dificultad: Â¡MODO IMPOSIBLE! (Lluvia masiva)" << std::endl;
             break;
     }
     std::cout << "========================================\n" << std::endl;
@@ -245,15 +300,22 @@ colorVec backgroundColor(0.0f, 0.0f, 0.0f); // white background
 // variable for current drawing mode
 GLenum currentDrawMode = GL_TRIANGLES;
 
-// Continuous input polling — runs every frame
+// Continuous input polling â€” runs every frame
 void processInput(GLFWwindow* window);
 
 // Funciones del juego (definidas despues de main)
 void handleShooting(GLFWwindow* window, float currentFrame);
 void updateBullets(float deltaTime);
 void spawnAsteroids(float currentFrame);
-void processAsteroids(float deltaTime, unsigned int shaderProgram, GLint normalMatrixLoc);
+void updateAsteroids(float deltaTime);
+void drawAsteroids(unsigned int shaderProgram, GLint normalMatrixLoc);
 void drawBullets(unsigned int shaderProgram, GLint normalMatrixLoc);
+void updateExplosionParticles(float deltaTime);
+void drawExplosionParticles(unsigned int shaderProgram, GLint normalMatrixLoc);
+void renderScene(unsigned int shaderProgram, const matriz4x4& viewMatrix,
+                 const matriz4x4& projMatrix, const vec3& camPos,
+                 GLint viewLoc, GLint projLoc, GLint modelLoc, GLint normalMatrixLoc,
+                 bool drawRubikFlag);
 
 // =========================================================================
 // SHADERS CON ILUMINACION (Phase 1: Ambient + Directional, Phase 2: Point)
@@ -407,7 +469,7 @@ int main()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); // mezcla de textura con triangulos
 
     // CARGA DE TEXTURAS Y MALLAS
-    unsigned int ourTextureID = loadTexture("assets/cubitoBorder.png");
+    ourTextureID = loadTexture("assets/cubitoBorder.png");
 
     if (ourTextureID) {
         std::cout << "All textures loaded successfully!" << std::endl;
@@ -416,7 +478,7 @@ int main()
     }
 
     // Cargar textura de la nave
-    unsigned int spaceshipTexID = loadTexture("assets/spaceshiptexture.bmp");
+    spaceshipTexID = loadTexture("assets/spaceshiptexture.bmp");
 
     // Cargar textura y malla del asteroide
     asteroideTexID = loadTexture("assets/asteroide.jpg");
@@ -436,11 +498,13 @@ int main()
     // Inicializar Agujero Negro (Reemplaza al Skybox estándar)
     //BlackHole blackhole;
     blackhole.init();
-	blackhole.position[0] = 20.0f;  // Mueve el BH lejos del Rubik en X
-	blackhole.bhRadius     = 2.0f;
-	blackhole.diskInner    = 3.0f;
-	blackhole.diskOuter    = 8.0f;
-	blackhole.diskParticles = 500;
+    blackhole.position[0] = 0.0f;
+	blackhole.position[1] = 0.0f;
+	blackhole.position[2] = 90.0f;  // BH al frente de la nave en Z
+	blackhole.bhRadius     = 5.0f;
+	blackhole.diskInner    = 7.0f;
+	blackhole.diskOuter    = 22.0f;
+	blackhole.diskParticles = 800;
 	blackhole.diskAlpha = 0.5;
 
     // Inicializar Nave Espacial
@@ -450,6 +514,9 @@ int main()
     
     // Posición inicial de juego de la nave (Tomada de tu versión de asteroides)
     spaceship.setPosition(vec3(0.0f, 0.0f, -10.0f));
+
+    // Inicializar efecto de thruster
+    thrusterEffect.init();
 
     // Compilación de Shaders
     unsigned int vertexShader = glCreateShader(GL_VERTEX_SHADER);
@@ -500,7 +567,14 @@ int main()
     // Sincronizar tiempo de inicio
     lastFrame = glfwGetTime();
 
+    // Configurar camara para modo menu
+    camera.setDistance(MENU_CAMERA_DISTANCE);
+    camera.setPitch(MENU_CAMERA_PITCH);
+    camera.setTarget(vec3(blackhole.position[0], blackhole.position[1], blackhole.position[2]));
+
+    // =========================================================================
     // RENDER LOOP UNIFICADO
+    // =========================================================================
     while (!glfwWindowShouldClose(window))
     {
         currentFrame = glfwGetTime();
@@ -512,152 +586,168 @@ int main()
             invincibleTimer -= deltaTime;
         }
 
-        // Captura de controles continuos (Cámara Orbital, Nave y Rotación del Cubo)
-        processInput(window); 
+        // Captura de controles continuos
+        processInput(window);
 
-        // DISPARO DE BALAS (Click Izquierdo del Mouse)
-        handleShooting(window, currentFrame);
+        // DISPARO DE BALAS (solo en modo juego)
+        if (currentMode == MODE_GAME) {
+            handleShooting(window, currentFrame);
+        }
 
-        // Listener de eventos discretos (Teclas de control del Cubo)
+        // Listener de eventos discretos
         glfwSetKeyCallback(window, key_callback);
 
-        // Limpieza de pantalla
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-		glClearColor(backgroundColor.x, backgroundColor.y, backgroundColor.z, 1.0f);
-
-        // Actualización de Animaciones lógicas y de cámara
+        // =====================================================================
+        // UPDATE PHASE (una vez por frame)
+        // =====================================================================
         camera.updateCameraAnimation(deltaTime);
-        camera.setTarget(spaceship.getPosition());
 
-        if (camera.isFollowMode()) {
-            camera.updateFollow(spaceship.getPosition(), spaceship.yaw, spaceship.pitch, deltaTime);
+        if (currentMode == MODE_MENU) {
+            // --- Menu mode: auto-orbit spaceship around black hole ---
+            menuOrbitAngle += MENU_ORBIT_SPEED * deltaTime;
+            if (menuOrbitAngle >= 360.0f) menuOrbitAngle -= 360.0f;
+            float orbitRad = helper::toRadians(menuOrbitAngle);
+            spaceship.setPosition(vec3(
+                blackhole.position[0] + MENU_ORBIT_RADIUS * cosf(orbitRad),
+                blackhole.position[1] + 1.0f,
+                blackhole.position[2] + MENU_ORBIT_RADIUS * sinf(orbitRad)
+            ));
+            spaceship.yaw = 180.0f - menuOrbitAngle;
+            spaceship.pitch = 0.0f;
+            thrusterEffect.isThrusting = true;
+
+            // Auto-orbit isometric camera (incremental, compatible with manual WASD/QE)
+            camera.setYaw(camera.getYaw() + MENU_CAMERA_ORBIT_SPEED * deltaTime);
+            camera.setTarget(vec3(blackhole.position[0], blackhole.position[1], blackhole.position[2]));
+        } else {
+            // --- Game mode: camera tracks spaceship ---
+            camera.setTarget(spaceship.getPosition());
+            if (camera.isFollowMode()) {
+                camera.updateFollow(spaceship.getPosition(), spaceship.yaw, spaceship.pitch, deltaTime);
+            }
         }
 
         cuboRubik->update_animation(deltaTime);
+        blackhole.update(deltaTime);
+        updateBullets(deltaTime);
+        spawnAsteroids(currentFrame);
+        updateAsteroids(deltaTime);
+        updateExplosionParticles(deltaTime);
+        thrusterEffect.emit(spaceship.getPosition(), spaceship.getForward(), spaceship.getRight());
+        thrusterEffect.update(deltaTime);
 
-        // Obtener locations para transformaciones de matrices del Shader principal
+        // DETECCION DE VICTORIA / AVANCE DE NIVEL (solo en modo juego)
+        if (currentMode == MODE_GAME && !gameOver) {
+            vec3 shipPos = spaceship.getPosition();
+            vec3 bhPos(blackhole.position[0], blackhole.position[1], blackhole.position[2]);
+            float distToBH = helper::length(shipPos - bhPos);
+            if (distToBH <= WIN_RADIUS) {
+                if (nivelActual < 5) {
+                    nivelActual++;
+                    std::cout << "\n==================================================" << std::endl;
+                    std::cout << " Â¡NIVEL COMPLETADO! Has cruzado el Agujero Negro" << std::endl;
+                    std::cout << "==================================================" << std::endl;
+                    resetPosicionNave();
+                    actualizarDificultadNivel();
+                } else {
+                    std::cout << "\n==================================================" << std::endl;
+                    std::cout << "  Â¡Â¡FELICIDADES!! HAS COMPLETADO EL JUEGO (NIVEL 5) " << std::endl;
+                    std::cout << "  Ganaste el juego " << std::endl;
+                    std::cout << "==================================================" << std::endl;
+                    gameOver = true;
+                }
+            }
+        }
+
+        // =====================================================================
+        // RENDER PHASE
+        // =====================================================================
+
+        // Obtener locations del shader principal
         viewLoc = glGetUniformLocation(shaderProgram, "view");
         projLoc = glGetUniformLocation(shaderProgram, "projection");
         modelLoc = glGetUniformLocation(shaderProgram, "model");
         GLint normalMatrixLoc = glGetUniformLocation(shaderProgram, "normalMatrix");
-        GLint viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
-        ourTextureLoc = glGetUniformLocation(shaderProgram, "ourTexture");
-
-        // Seleccionar matriz de vista activa (Seguimiento o Libre)
-        matriz4x4 viewMatrix = camera.isFollowMode() ? camera.getFollowViewMatrix() : camera.getViewMatrix();
 
         int width, height;
         glfwGetFramebufferSize(window, &width, &height);
-        float aspectRatio = (float)width / (float)height;
-        matriz4x4 projMatrix = camera.getPerspectiveMatrix(aspectRatio);
 
-        // 1. DIBUJAR ENTORNO: AGUJERO NEGRO (Nebulosa + Esfera + Disco de Acreción)
-        blackhole.update(deltaTime);
-        blackhole.draw(viewMatrix, projMatrix);
+        // Limpiar pantalla completa
+        glViewport(0, 0, width, height);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glClearColor(backgroundColor.x, backgroundColor.y, backgroundColor.z, 1.0f);
 
-        // 2. ACTIVAR SHADER PRINCIPAL CON TEXTURAS E ILUMINACION PARA LOS OBJETOS 3D
-        glUseProgram(shaderProgram);
+        // =====================================================================
+        // MAIN VIEWPORT (pantalla completa)
+        // =====================================================================
+        matriz4x4 mainView;
+        vec3 mainCamPos;
+        float mainAspect = (float)width / (float)height;
+        matriz4x4 mainProj = helper::buildPerspectiveMatrix(camera.getFov(), mainAspect, 0.1f, 300.0f);
 
-        // Enviar matrices de cámara actualizadas al shader program
-        glUniformMatrix4fv(viewLoc, 1, GL_TRUE, viewMatrix.mat.data());
-        glUniformMatrix4fv(projLoc, 1, GL_TRUE, projMatrix.mat.data());
-
-        // ---- PHASE 2: Upload black hole as point light + optional distant star ----
-        vec3 bhPos(blackhole.position[0], blackhole.position[1], blackhole.position[2]);
-        vec3 shipPos = spaceship.getPosition();
-
-        // Black hole as point light 0 (warm orange glow)
-        glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[0].position"),
-            bhPos.x, bhPos.y, bhPos.z);
-        glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[0].color"),
-            1.0f, 0.4f, 0.05f);        // warm orange (matches disk colors)
-
-        // Dynamic intensity based on distance to black hole
-        float distToBH = helper::length(shipPos - bhPos);
-        float proximityBoost = 1.0f + 5.0f * (1.0f / (1.0f + distToBH * 0.1f));
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].intensity"),
-            2.0f * proximityBoost);
-
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].constant"), 1.0f);
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].linear"), 0.09f);
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].quadratic"), 0.032f);
-
-        // Point light 1: distant blue star (fills shadows from opposite side)
-        glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[1].position"),
-            -50.0f, 30.0f, -20.0f);
-        glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[1].color"),
-            0.3f, 0.5f, 0.8f);          // cool blue
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].intensity"),
-            0.5f);
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].constant"), 1.0f);
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].linear"), 0.045f);
-        glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].quadratic"), 0.0075f);
-
-        glUniform1i(glGetUniformLocation(shaderProgram, "numPointLights"), 2);
-
-        // Upload camera position for lighting calculations
-        vec3 camPos;
-        if (camera.isFollowMode()) {
-            // Approximate camera position from follow mode
-            camPos = shipPos;
-        } else {
+        if (currentMode == MODE_MENU) {
+            mainView = camera.getViewMatrix();
+            vec3 target = camera.getTarget();
             float pitchRad = helper::toRadians(camera.getPitch());
             float yawRad = helper::toRadians(camera.getYaw());
             float dist = camera.getDistance();
-            camPos = vec3(
-                shipPos.x + dist * std::cos(pitchRad) * std::cos(yawRad),
-                shipPos.y + dist * std::sin(pitchRad),
-                shipPos.z + dist * std::cos(pitchRad) * std::sin(yawRad)
+            mainCamPos = vec3(
+                target.x + dist * std::cos(pitchRad) * std::cos(yawRad),
+                target.y + dist * std::sin(pitchRad),
+                target.z + dist * std::cos(pitchRad) * std::sin(yawRad)
             );
-        }
-        glUniform3f(viewPosLoc, camPos.x, camPos.y, camPos.z);
-
-        // ---- Draw Rubik's Cube ----
-        matriz4x4 modelMatrixCube; // identity matrix
-        std::array<float, 9> normalMatrixCube = helper::extract_normal_matrix(modelMatrixCube);
-        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, modelMatrixCube.mat.data());
-        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, normalMatrixCube.data());
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, ourTextureID);
-        cuboRubik->draw(shaderProgram);
-
-        // ---- Update and draw game objects ----
-        updateBullets(deltaTime);
-        spawnAsteroids(currentFrame);
-        processAsteroids(deltaTime, shaderProgram, normalMatrixLoc);
-		processParticles(deltaTime, shaderProgram, normalMatrixLoc); //particulas de la explosion
-        drawBullets(shaderProgram, normalMatrixLoc);
-
-        // DETECCIÓN DE VICTORIA / AVANCE DE NIVEL
-        if (!gameOver) {
-            // Comparamos la distancia actual contra el radio fisico de la esfera
-            if (distToBH <= blackhole.bhRadius) {
-                if (nivelActual < 5) {
-                    nivelActual++;
-                    std::cout << "\n==================================================" << std::endl;
-                    std::cout << " ¡NIVEL COMPLETADO! Has cruzado el Agujero Negro" << std::endl;
-                    std::cout << "==================================================" << std::endl;
-                    resetPosicionNave();
-                    actualizarDificultadNivel(); 
-                } else {
-                    std::cout << "\n==================================================" << std::endl;
-                    std::cout << "  ¡¡FELICIDADES!! HAS COMPLETADO EL JUEGO (NIVEL 5) " << std::endl;
-                    std::cout << "  Ganaste el juego " << std::endl;
-                    std::cout << "==================================================" << std::endl;
-                    gameOver = true; 
-                }
+        } else {
+            mainView = camera.isFollowMode() ? camera.getFollowViewMatrix() : camera.getViewMatrix();
+            vec3 shipPos = spaceship.getPosition();
+            if (camera.isFollowMode()) {
+                mainCamPos = shipPos;
+            } else {
+                float pitchRad = helper::toRadians(camera.getPitch());
+                float yawRad = helper::toRadians(camera.getYaw());
+                float dist = camera.getDistance();
+                mainCamPos = vec3(
+                    shipPos.x + dist * std::cos(pitchRad) * std::cos(yawRad),
+                    shipPos.y + dist * std::sin(pitchRad),
+                    shipPos.z + dist * std::cos(pitchRad) * std::sin(yawRad)
+                );
             }
         }
-		
-        // ---- Draw Spaceship ----
-        matriz4x4 modelMatrixShip = spaceship.getModelMatrix();
-        std::array<float, 9> normalMatrixShip = helper::extract_normal_matrix(modelMatrixShip);
-        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, modelMatrixShip.mat.data());
-        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, normalMatrixShip.data());
-        glUniform1i(ourTextureLoc, 0);
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, spaceshipTexID);
-        spaceship.draw(shaderProgram, viewMatrix, projMatrix);
+
+        renderScene(shaderProgram, mainView, mainProj, mainCamPos,
+                    viewLoc, projLoc, modelLoc, normalMatrixLoc,
+                    false); // Rubik desactivado en modo juego
+
+        // =====================================================================
+        // PIP VIEWPORT (solo en modo menu)
+        // =====================================================================
+        if (currentMode == MODE_MENU) {
+            int pipW = (int)(width * PIP_SIZE_RATIO);
+            int pipH = (int)(height * PIP_SIZE_RATIO);
+            int pipX = width - pipW - 10;
+            int pipY = 10;
+
+            glViewport(pipX, pipY, pipW, pipH);
+            glClear(GL_DEPTH_BUFFER_BIT);
+
+            // Side camera: left of ship, closer
+            vec3 shipPos = spaceship.getPosition();
+            vec3 shipLeft = spaceship.getLeft();
+            vec3 pipEye = vec3(
+                shipPos.x + shipLeft.x * 3.0f,
+                shipPos.y + 0.5f,
+                shipPos.z + shipLeft.z * 3.0f
+            );
+            matriz4x4 pipView = helper::buildLookAtMatrix(pipEye, shipPos, vec3(0.0f, 1.0f, 0.0f));
+            float pipAspect = (float)pipW / (float)pipH;
+            matriz4x4 pipProj = helper::buildPerspectiveMatrix(60.0f, pipAspect, 0.1f, 300.0f);
+
+            renderScene(shaderProgram, pipView, pipProj, pipEye,
+                        viewLoc, projLoc, modelLoc, normalMatrixLoc,
+                        false); // Sin Rubik en PIP
+
+            // Restaurar viewport completo
+            glViewport(0, 0, width, height);
+        }
 
         // Swap de buffers e IO eventos
         glfwSwapBuffers(window);
@@ -676,6 +766,29 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
 
+    // MODO MENU: solo ENTER para iniciar juego
+    if (currentMode == MODE_MENU) {
+        if (key == GLFW_KEY_ENTER && action == GLFW_PRESS) {
+            currentMode = MODE_GAME;
+            resetPosicionNave();
+            listaAsteroides.clear();
+            listaParticulas.clear();
+            nivelActual = 1;
+            vidas = 3;
+            gameOver = false;
+            invincibleTimer = 0.0f;
+            asteroidesDestruidos = 0;
+            actualizarDificultadNivel();
+            camera.reset();
+            camera.enableFollowMode();
+            std::cout << "\n============================================" << std::endl;
+            std::cout << "  MISION INICIADA - Â¡Destruye los asteroides!" << std::endl;
+            std::cout << "  Flechas: Mover | Ratón: Apuntar + Disparar" << std::endl;
+            std::cout << "============================================\n" << std::endl;
+        }
+        return;
+    }
+
     // Reiniciar juego
     bool gameReset = false;
     if (key == GLFW_KEY_R && action == GLFW_PRESS) {
@@ -687,6 +800,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
             asteroidesDestruidos = 0;
             listaAsteroides.clear();
             listaBalas.clear();
+            thrusterEffect.particles.clear();
             tiempoUltimoDisparo = 0.0f;
             spaceship.setPosition(vec3(0.0f, 0.0f, -10.0f));
             spaceship.yaw = 0.0f;
@@ -748,7 +862,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     
     if (key == GLFW_KEY_L && action == GLFW_PRESS) backgroundColor = getRandomColor();
 
-    // ALTERNAR MODO DE CÁMARA (Orbital vs. Primera Persona en Nave) con la tecla F
+    // ALTERNAR MODO DE CAMARA (Orbital vs. Primera Persona en Nave) con la tecla F
     if (key == GLFW_KEY_F && action == GLFW_PRESS) {
         camera.toggleFollowMode();
     }
@@ -761,6 +875,17 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 // Entrada continua (Acciones fluidas por frame)
 void processInput(GLFWwindow* window) {
+    // MODO MENU: solo controles de camara orbital
+    if (currentMode == MODE_MENU) {
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.moveForward(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camera.moveBackward(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camera.moveLeft(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camera.moveRight(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) camera.zoomIn(deltaTime);
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) camera.zoomOut(deltaTime);
+        return;
+    }
+
     if (gameOver) return; // No permitir movimiento si el juego termino
     // Si NO estamos siguiendo la nave, las teclas WASD controlan el modo orbital libre
     if (!camera.isFollowMode()) {
@@ -778,7 +903,10 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) spaceship.moveForward(step);
     if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) spaceship.moveBackward(step);
     if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) spaceship.yaw += 90.0f * deltaTime;  
-    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) spaceship.yaw -= 90.0f * deltaTime; 
+    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) spaceship.yaw -= 90.0f * deltaTime;
+
+    // Thruster effect: activar cuando se presiona UP
+    thrusterEffect.isThrusting = (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS); 
 
     // Rotación Global del Cubo Rubik mediante matrices (Z, X, C)
     const float rotSpeed = 90.0f;
@@ -786,6 +914,9 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) cuboRubik->rotarCuboGlobalX(ang);
     if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) cuboRubik->rotarCuboGlobalX(-ang);
     if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) cuboRubik->rotarCuboGlobalY(ang);
+
+    // Limitar la nave al corredor de juego
+    clampShipToCorridor();
 }
 
 // =========================================================================
@@ -841,7 +972,7 @@ void spawnAsteroids(float currentFrame) {
         float dispersionY = ((float)(rand() % 100) / 100.0f * 6.0f) - 3.0f; // [-3.0f, 3.0f]
         vec3 puntoDestino(navePos.x + dispersionX, navePos.y + dispersionY, navePos.z);
 
-        // 2. SISTEMA DE PROBABILIDAD DE TAMAÑO (De tus compañeros)
+        // 2. SISTEMA DE PROBABILIDAD DE TAMANO (De tus compaeros)
         // 30% pequeños (0.5), 50% medianos (1.0), 20% grandes (1.5)
         float sizeRoll = (float)(rand() % 100) / 100.0f;
         float tamanoAleatorio;
@@ -862,45 +993,28 @@ void spawnAsteroids(float currentFrame) {
     }
 }
 
-// Actualizar, dibujar y gestionar colisiones de todos los asteroides
-void processAsteroids(float deltaTime, unsigned int shaderProgram, GLint normalMatrixLoc) {
-	GLint ourTextureLoc =
-    glGetUniformLocation(shaderProgram, "ourTexture");
-    glUniform1i(ourTextureLoc, 0);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, asteroideTexID);
-
+// Actualizar posiciones y colisiones de asteroides (sin dibujar)
+void updateAsteroids(float deltaTime) {
     for (size_t i = 0; i < listaAsteroides.size(); ) {
         listaAsteroides[i].update(deltaTime);
 
-        // Upload model and normal matrix for lighting
-        matriz4x4 asteroidModel = listaAsteroides[i].getModelMatrix();
-        std::array<float, 9> asteroidNormalMat = helper::extract_normal_matrix(asteroidModel);
-        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, asteroidModel.mat.data());
-        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, asteroidNormalMat.data());
-
-        listaAsteroides[i].draw(shaderProgram);
-
         bool removed = false;
 
-        // Colision nave-asteroide
-        if (!gameOver && invincibleTimer <= 0.0f) {
+        // Colision nave-asteroide (solo en modo juego)
+        if (currentMode == MODE_GAME && !gameOver && invincibleTimer <= 0.0f) {
             if (helper::checkSphereCollision(
                     spaceship.getPosition(), spaceship.getCollisionRadius(),
                     listaAsteroides[i].position, listaAsteroides[i].getCollisionRadius())) {
                 vidas--;
                 std::cout << "[COLISION] Impacto! Vidas restantes: " << vidas << std::endl;
                 invincibleTimer = INVINCIBLE_DURATION;
-				//
 				if (listaAsteroides[i].isDestroyed()) {
 					asteroidesDestruidos++;
 					emitirExplosion(listaAsteroides[i].position, listaAsteroides[i].scale);
-
 					std::cout << "[DISPARO] Asteroide destruido!..." << std::endl;
 					listaAsteroides.erase(listaAsteroides.begin() + i);
 					removed = true;
 				}
-                //listaAsteroides.erase(listaAsteroides.begin() + i);
                 removed = true;
                 if (vidas <= 0) {
                     gameOver = true;
@@ -912,8 +1026,8 @@ void processAsteroids(float deltaTime, unsigned int shaderProgram, GLint normalM
             }
         }
 
-        // Colision bala-asteroide
-        if (!removed) {
+        // Colision bala-asteroide (solo en modo juego)
+        if (!removed && currentMode == MODE_GAME) {
             for (size_t j = 0; j < listaBalas.size(); ) {
                 if (helper::checkSphereCollision(
                         listaBalas[j].position, listaBalas[j].getCollisionRadius(),
@@ -933,15 +1047,31 @@ void processAsteroids(float deltaTime, unsigned int shaderProgram, GLint normalM
             }
         }
 
-        // Eliminar asteroides fuera de rango
+        // Eliminar asteroides fuera de rango (pasaron la nave)
         if (!removed) {
-            if (listaAsteroides[i].position.z > 5.0f) {
+            if (listaAsteroides[i].position.z < CORRIDOR_MIN_Z) {
                 asteroidesDestruidos++;
                 listaAsteroides.erase(listaAsteroides.begin() + i);
             } else {
                 i++;
             }
         }
+    }
+}
+
+// Dibujar todos los asteroides activos
+void drawAsteroids(unsigned int shaderProgram, GLint normalMatrixLoc) {
+    GLint ourTextureLoc = glGetUniformLocation(shaderProgram, "ourTexture");
+    glUniform1i(ourTextureLoc, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, asteroideTexID);
+
+    for (size_t i = 0; i < listaAsteroides.size(); i++) {
+        matriz4x4 asteroidModel = listaAsteroides[i].getModelMatrix();
+        std::array<float, 9> asteroidNormalMat = helper::extract_normal_matrix(asteroidModel);
+        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, asteroidModel.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, asteroidNormalMat.data());
+        listaAsteroides[i].draw(shaderProgram);
     }
 }
 
@@ -962,8 +1092,61 @@ void drawBullets(unsigned int shaderProgram, GLint normalMatrixLoc) {
 }
 
 
+// Dibujar toda la escena para un viewport dado (llamada una vez por viewport)
+void renderScene(unsigned int shaderProgram, const matriz4x4& viewMatrix,
+                 const matriz4x4& projMatrix, const vec3& camPos,
+                 GLint viewLoc, GLint projLoc, GLint modelLoc, GLint normalMatrixLoc,
+                 bool drawRubikFlag) {
+
+    // 1. Dibujar agujero negro (usa sus propios shaders internos)
+    blackhole.draw(viewMatrix, projMatrix);
+
+    // 2. Restaurar estado para objetos del shader principal
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(shaderProgram);
+    glUniformMatrix4fv(viewLoc, 1, GL_TRUE, viewMatrix.mat.data());
+    glUniformMatrix4fv(projLoc, 1, GL_TRUE, projMatrix.mat.data());
+
+    // 3. Upload iluminacion
+    uploadLighting(shaderProgram, camPos);
+
+    GLint ourTextureLoc = glGetUniformLocation(shaderProgram, "ourTexture");
+
+    // 4. Dibujar Rubik (opcional)
+    if (drawRubikFlag) {
+        glUniform1i(ourTextureLoc, 0);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, ourTextureID);
+        matriz4x4 modelMatrixCube;
+        std::array<float, 9> normalMatrixCube = helper::extract_normal_matrix(modelMatrixCube);
+        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, modelMatrixCube.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, normalMatrixCube.data());
+        cuboRubik->draw(shaderProgram);
+    }
+
+    // 5. Dibujar asteroides y particulas de explosion
+    drawAsteroids(shaderProgram, normalMatrixLoc);
+    drawExplosionParticles(shaderProgram, normalMatrixLoc);
+    drawBullets(shaderProgram, normalMatrixLoc);
+
+    // 6. Dibujar nave espacial
+    glUniform1i(ourTextureLoc, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, spaceshipTexID);
+    spaceship.draw(shaderProgram, viewMatrix, projMatrix);
+
+    // 7. Dibujar efecto de thruster
+    thrusterEffect.draw(shaderProgram, normalMatrixLoc, bulletTexID);
+}
+
 // Callback del mouse: controla hacia dónde mira la cabina de tu nave espacial
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (currentMode == MODE_MENU) return; // No rotar en modo menu
     if (gameOver) return; // No permitir rotacion si el juego termino
     float xf = (float)xpos;
     float yf = (float)ypos;

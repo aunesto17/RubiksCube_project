@@ -210,6 +210,32 @@ static inline std::array<float, 9> extract_normal_matrix(const matriz4x4& model)
 }
 
 
+inline matriz4x4 buildLookAtMatrix(const vec3& eye, const vec3& center, const vec3& up) {
+    vec3 w = normalize(vec3(eye.x - center.x, eye.y - center.y, eye.z - center.z));
+    vec3 u = normalize(crossProduct(up, w));
+    vec3 v = crossProduct(w, u);
+    matriz4x4 viewMat;
+    viewMat.mat = {
+         u.getX(),  u.getY(),  u.getZ(), -dotProduct(u, eye),
+         v.getX(),  v.getY(),  v.getZ(), -dotProduct(v, eye),
+         w.getX(),  w.getY(),  w.getZ(), -dotProduct(w, eye),
+         0.0f,      0.0f,      0.0f,      1.0f
+    };
+    return viewMat;
+}
+
+inline matriz4x4 buildPerspectiveMatrix(float fovDeg, float aspectRatio, float zNear, float zFar) {
+    float tanHalfFov = std::tan(toRadians(fovDeg) / 2.0f);
+    matriz4x4 projMat;
+    projMat.mat = {
+        1.0f / (aspectRatio * tanHalfFov), 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f / tanHalfFov, 0.0f, 0.0f,
+        0.0f, 0.0f, -(zFar + zNear) / (zFar - zNear), -(2.0f * zFar * zNear) / (zFar - zNear),
+        0.0f, 0.0f, -1.0f, 0.0f
+    };
+    return projMat;
+}
+
 } // namespace helper
 
 unsigned int loadTexture(const char* path) {

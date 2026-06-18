@@ -133,6 +133,12 @@ public:
         return vec3(std::cos(yawRad), 0.0f, -std::sin(yawRad));
     }
 
+    // Calcula la direccion izquierda en el plano horizontal (sin pitch)
+    vec3 getLeft() const {
+        vec3 r = getRight();
+        return vec3(-r.x, -r.y, -r.z);
+    }
+
     // Mueve la nave hacia adelante en la direccion que apunta la punta de la nave
     void moveForward(float step) {
         vec3 fwd = getForward();

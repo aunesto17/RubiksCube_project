@@ -59,7 +59,7 @@ private:
 
     // --- Hard limits ---
     static constexpr float MIN_DISTANCE = 3.0f;
-    static constexpr float MAX_DISTANCE = 40.0f;
+    static constexpr float MAX_DISTANCE = 300.0f;
     static constexpr float MIN_FOV = 1.0f;
     static constexpr float MAX_FOV = 90.0f;
     static constexpr float MAX_PITCH = 89.9f;
@@ -69,8 +69,9 @@ private:
 
     // --- Modo camara seguimiento (follow mode) ---
     bool followMode = false;          // indica si el modo seguimiento esta activo
-    float followDistance = 8.0f;      // distancia detras de la nave
-    float followHeight = 3.0f;        // altura sobre la nave
+    float followDistance = 4.0f;      // distancia detras de la nave
+    float followHeight = 2.0f;        // altura sobre la nave
+    float followLookAhead = 6.0f;     // distancia hacia adelante para mirar (empuja la nave hacia abajo en pantalla)
     float followSmoothing = 5.0f;     // velocidad de suavizado (mayor = mas rapido)
     vec3 smoothedEyePos;              // posicion suavizada de la camara (interpola)
     bool followInitialized = false;   // flag para inicializar la posicion suavizada
@@ -169,7 +170,7 @@ public:
     // Get perspective projection matrix using matriz4x4
     matriz4x4 getPerspectiveMatrix(float aspectRatio) {
         float zNear = 0.1f;
-        float zFar = 100.0f;
+        float zFar = 300.0f;
         float tanHalfFov = std::tan(helper::toRadians(fov) / 2.0f);
 
         matriz4x4 projMat;
@@ -281,6 +282,11 @@ public:
         followInitialized = false; // reinicia la posicion suavizada al cambiar de modo
         std::cout << "[Camera] Follow mode: " << (followMode ? "ON" : "OFF") << std::endl;
     }
+    void enableFollowMode() {
+        followMode = true;
+        followInitialized = false;
+        std::cout << "[Camera] Follow mode: ON" << std::endl;
+    }
 
     // Actualiza la camara para seguir a la nave desde atras y arriba
     // Calcula la posicion deseada atras de la nave y la suaviza con interpolacion exponencial
@@ -314,9 +320,12 @@ public:
             smoothedEyePos.z += (desiredEye.z - smoothedEyePos.z) * t;
         }
 
-        // Construye la matriz LookAt mirando hacia la posicion de la nave
+        // Construye la matriz LookAt mirando hacia adelante de la nave (no directamente a la nave)
+        // Esto empuja la nave hacia la parte inferior de la pantalla y muestra el horizonte
         vec3 eye = smoothedEyePos;
-        vec3 center = shipPos;
+        vec3 center(shipPos.x + shipForward.x * followLookAhead,
+                    shipPos.y + shipForward.y * followLookAhead,
+                    shipPos.z + shipForward.z * followLookAhead);
         vec3 up(0.0f, 1.0f, 0.0f);
 
         vec3 w = helper::normalize(vec3(eye.x - center.x, eye.y - center.y, eye.z - center.z));
