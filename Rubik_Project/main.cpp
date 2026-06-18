@@ -37,6 +37,21 @@ float invincibleTimer = 0.0f;   // tiempo restante de invencibilidad tras un gol
 const float INVINCIBLE_DURATION = 2.0f;  // duracion de invencibilidad post-golpe
 int asteroidesDestruidos = 0;   // contador de asteroides que pasaron la nave (score basico)
 
+// SISTEMA DE PARTICULAS PARA EXPLOSIONES de ASTEROIDES
+struct Particle {
+    vec3 position;
+    vec3 velocity;
+    float lifetime; // Tiempo de vida restante en segundos
+    float maxLifetime; // Tiempo total de vida util
+    float size;
+	//Asteroid* visual = nullptr; //
+	vec3 color;
+};
+
+// Lista dinámica de particulas activas en el espacio
+std::vector<Particle> listaParticulas;
+
+
 // VARIABLES GLOBALES - SISTEMA DE BALAS (SHOOTING)
 std::vector<Bullet> listaBalas;
 float tiempoUltimoDisparo = 0.0f;
@@ -74,6 +89,144 @@ colorVec getRandomColor() {
 Camera camera;
 CuboRubik * cuboRubik = new CuboRubik(glfwGetTime(), camera);
 Spaceship spaceship;
+
+BlackHole blackhole;
+
+// VARIABLES GLOBALES DE CONTROL DE JUEGO por NIVELES
+int nivelActual = 1;
+float velocidadAsteroideBase = 7.0f; 
+
+// Función auxiliar para reiniciar el estado de la nave al cambiar de nivel o perder
+void resetPosicionNave() {
+    spaceship.setPosition(vec3(0.0f, 0.0f, -10.0f));
+    spaceship.yaw = 0.0f;
+    spaceship.pitch = 0.0f;
+    listaAsteroides.clear(); // Limpiar rocas viejas para evitar colisiones injustas
+    if (listaBalas.size() > 0) listaBalas.clear(); 
+}
+
+void emitirExplosion(vec3 origen, float escalaAsteroide) {
+    int cantidadParticulas = 20; // Más partículas para que se note la ráfaga
+    
+    for (int i = 0; i < cantidadParticulas; i++) {
+        Particle p;
+        p.position = origen;
+        
+        // Dispersión aleatoria 3D
+        float theta = ((float)(rand() % 100) / 100.0f) * 2.0f * 3.141592f;
+        float phi = asinf(((float)(rand() % 100) / 100.0f) * 2.0f - 1.0f);
+        float velocidad = 4.0f + ((float)(rand() % 100) / 100.0f) * 6.0f; 
+        
+        p.velocity.x = cosf(phi) * cosf(theta) * velocidad;
+        p.velocity.y = sinf(phi) * velocidad;
+        p.velocity.z = cosf(phi) * sinf(theta) * velocidad;
+        
+        p.maxLifetime = 0.6f + ((float)(rand() % 100) / 100.0f) * 0.4f;
+        p.lifetime = p.maxLifetime;
+        
+        // Tamaño en unidades del mundo (visible a simple vista)
+        p.size = 0.4f + ((float)(rand() % 100) / 100.0f) * 0.4f;
+        
+        // Color aleatorio entre Rojo y Amarillo Brillante (Fuego)
+        p.color.x = 1.0f;                                     // Mucho Rojo
+        p.color.y = 0.3f + ((float)(rand() % 100) / 100.0f) * 0.6f; // Variación de Verde para dar Naranja/Amarillo
+        p.color.z = 0.0f;                                     // Nada de Azul
+        
+        listaParticulas.push_back(p);
+    }
+}
+
+void processParticles(float deltaTime, unsigned int shaderProgram, GLint normalMatrixLoc) {
+    if (listaParticulas.empty()) return;
+
+    // 1. Avisar al shader que pinte un color plano sin textura si tiene la variable
+    GLint useTextureLoc = glGetUniformLocation(shaderProgram, "useTexture");
+    if (useTextureLoc != -1) glUniform1i(useTextureLoc, 0);
+
+    for (size_t i = 0; i < listaParticulas.size(); ) {
+        listaParticulas[i].lifetime -= deltaTime;
+        
+        if (listaParticulas[i].lifetime <= 0.0f) {
+            listaParticulas.erase(listaParticulas.begin() + i);
+            continue;
+        }
+        
+        // Actualizar posición física
+        listaParticulas[i].position.x += listaParticulas[i].velocity.x * deltaTime;
+        listaParticulas[i].position.y += listaParticulas[i].velocity.y * deltaTime;
+        listaParticulas[i].position.z += listaParticulas[i].velocity.z * deltaTime;
+        
+        // Factor de encogimiento (fade-out de tamaño)
+        float factorVida = listaParticulas[i].lifetime / listaParticulas[i].maxLifetime;
+        float escalaFinal = listaParticulas[i].size * factorVida;
+        
+        // Construcción manual de la matriz de modelado (Cubo posicionado y escalado)
+        matriz4x4 modelMatrix;
+        modelMatrix.mat = {
+            escalaFinal, 0.0f,        0.0f,        listaParticulas[i].position.x,
+            0.0f,        escalaFinal, 0.0f,        listaParticulas[i].position.y,
+            0.0f,        0.0f,        escalaFinal, listaParticulas[i].position.z,
+            0.0f,        0.0f,        0.0f,        1.0f
+        };
+        
+        // Inyectamos la matriz de modelado al shader
+        glUniformMatrix4fv(glGetUniformLocation(shaderProgram, "model"), 1, GL_TRUE, modelMatrix.mat.data());
+        
+        // Hack de Iluminación/Color: Forzamos que el objeto brille ignorando las sombras
+        // Pasamos el color directamente a los coeficientes de reflexión difusa/ambiental si el shader los tiene
+        GLint materialColorLoc = glGetUniformLocation(shaderProgram, "material.diffuse");
+        if (materialColorLoc != -1) {
+            glUniform3f(materialColorLoc, listaParticulas[i].color.x, listaParticulas[i].color.y, listaParticulas[i].color.z);
+        }
+
+        // DIBUJAR: Reutilizamos el cubo del Rubik que sabemos que tu OpenGL renderiza perfectamente sin romperse
+        // Si tienes una variable VAO para el cubo o una clase Cubo, usa su bind aquí:
+        // En tu while usas: cuboRubik->draw(shaderProgram);
+        // Así que podemos forzar el dibujado usando la geometría que ya existe en el buffer:
+        cuboRubik->draw(shaderProgram); 
+        
+        i++;
+    }
+
+    // Restaurar texturas para los siguientes objetos del juego
+    if (useTextureLoc != -1) glUniform1i(useTextureLoc, 1);
+}
+
+// Función para actualizar las estadísticas según el nivel actual
+void actualizarDificultadNivel() {
+    std::cout << "\n========================================" << std::endl;
+    std::cout << "        ¡BIENVENIDO AL NIVEL " << nivelActual << "! " << std::endl;
+    
+    switch(nivelActual) {
+        case 1:
+            velocidadAsteroideBase = 7.0f;
+            frecuenciaSpawn = 1.8f;
+            std::cout << "   Dificultad: FACIL (Cuidado en el espacio)" << std::endl;
+            break;
+        case 2:
+            velocidadAsteroideBase = 10.0f;
+            frecuenciaSpawn = 1.4f;
+            std::cout << "   Dificultad: NORMAL (Aumenta la velocidad)" << std::endl;
+            break;
+        case 3:
+            velocidadAsteroideBase = 13.5f;
+            frecuenciaSpawn = 1.0f;
+            std::cout << "   Dificultad: DIFICIL (Rafagas constantes)" << std::endl;
+            break;
+        case 4:
+            velocidadAsteroideBase = 17.0f;
+            frecuenciaSpawn = 0.7f;
+            std::cout << "   Dificultad: MUY DIFICIL (Pocos segundos para reaccionar)" << std::endl;
+            break;
+        case 5:
+            velocidadAsteroideBase = 22.0f;
+            frecuenciaSpawn = 0.4f;
+            std::cout << "   Dificultad: ¡MODO IMPOSIBLE! (Lluvia masiva)" << std::endl;
+            break;
+    }
+    std::cout << "========================================\n" << std::endl;
+}
+
 bool isClockwise = true; // direccion de rotacion camadas
 
 Transform trans; // temporal para mover el cubo
@@ -281,7 +434,7 @@ int main()
     Bullet::initMesh(1.0f);
 
     // Inicializar Agujero Negro (Reemplaza al Skybox estándar)
-    BlackHole blackhole;
+    //BlackHole blackhole;
     blackhole.init();
 	blackhole.position[0] = 20.0f;  // Mueve el BH lejos del Rubik en X
 	blackhole.bhRadius     = 2.0f;
@@ -472,8 +625,30 @@ int main()
         updateBullets(deltaTime);
         spawnAsteroids(currentFrame);
         processAsteroids(deltaTime, shaderProgram, normalMatrixLoc);
+		processParticles(deltaTime, shaderProgram, normalMatrixLoc); //particulas de la explosion
         drawBullets(shaderProgram, normalMatrixLoc);
 
+        // DETECCIÓN DE VICTORIA / AVANCE DE NIVEL
+        if (!gameOver) {
+            // Comparamos la distancia actual contra el radio fisico de la esfera
+            if (distToBH <= blackhole.bhRadius) {
+                if (nivelActual < 5) {
+                    nivelActual++;
+                    std::cout << "\n==================================================" << std::endl;
+                    std::cout << " ¡NIVEL COMPLETADO! Has cruzado el Agujero Negro" << std::endl;
+                    std::cout << "==================================================" << std::endl;
+                    resetPosicionNave();
+                    actualizarDificultadNivel(); 
+                } else {
+                    std::cout << "\n==================================================" << std::endl;
+                    std::cout << "  ¡¡FELICIDADES!! HAS COMPLETADO EL JUEGO (NIVEL 5) " << std::endl;
+                    std::cout << "  Ganaste el juego " << std::endl;
+                    std::cout << "==================================================" << std::endl;
+                    gameOver = true; 
+                }
+            }
+        }
+		
         // ---- Draw Spaceship ----
         matriz4x4 modelMatrixShip = spaceship.getModelMatrix();
         std::array<float, 9> normalMatrixShip = helper::extract_normal_matrix(modelMatrixShip);
@@ -505,6 +680,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     bool gameReset = false;
     if (key == GLFW_KEY_R && action == GLFW_PRESS) {
         if (gameOver || vidas < 3) {
+			nivelActual = 1; // para el juego con niveles
             vidas = 3;
             gameOver = false;
             invincibleTimer = 0.0f;
@@ -648,25 +824,42 @@ void updateBullets(float deltaTime) {
 
 // Generar asteroides aleatorios con tamaños variables y velocidad escalada
 void spawnAsteroids(float currentFrame) {
-    if (currentFrame - tiempoUltimoAsteroide <= frecuenciaSpawn) return;
+    // 1. CONDICIONAL DE TIEMPO ESTRICTO: Controla que solo pase cada 1.5 segundos
+    if (currentFrame - tiempoUltimoAsteroide > frecuenciaSpawn) {
+            
+        // Origen exacto: El centro de la esfera del Agujero Negro [0]=X, [1]=Y, [2]=Z
+        float originX = blackhole.position[0];
+        float originY = blackhole.position[1];
+        float originZ = blackhole.position[2];
+        vec3 puntoOrigen(originX, originY, originZ);
 
-    float spawnX = ((float)(rand() % 40) - 20.0f);
-    float spawnY = ((float)(rand() % 20) - 10.0f);
-    vec3 puntoOrigen(spawnX, spawnY, -50.0f);
-    vec3 puntoDestino = spaceship.getPosition();
+        // Objetivo base: La ubicación de la nave del jugador
+        vec3 navePos = spaceship.getPosition();
 
-    // Tamano aleatorio: 30% small (0.5), 50% med (1.0), 20% large (1.5)
-    float sizeRoll = (float)(rand() % 100) / 100.0f;
-    float tamanoAleatorio;
-    if (sizeRoll < 0.3f)      tamanoAleatorio = 0.5f;
-    else if (sizeRoll < 0.8f) tamanoAleatorio = 1.0f;
-    else                      tamanoAleatorio = 1.5f;
+        // Variación aleatoria (Dispersión) para que salgan como ráfagas en cono
+        float dispersionX = ((float)(rand() % 100) / 100.0f * 6.0f) - 3.0f; // [-3.0f, 3.0f]
+        float dispersionY = ((float)(rand() % 100) / 100.0f * 6.0f) - 3.0f; // [-3.0f, 3.0f]
+        vec3 puntoDestino(navePos.x + dispersionX, navePos.y + dispersionY, navePos.z);
 
-    Asteroid nuevoAsteroide(puntoOrigen, puntoDestino, tamanoAleatorio);
-    nuevoAsteroide.speed = 4.5f / tamanoAleatorio;
-    listaAsteroides.push_back(nuevoAsteroide);
+        // 2. SISTEMA DE PROBABILIDAD DE TAMAÑO (De tus compañeros)
+        // 30% pequeños (0.5), 50% medianos (1.0), 20% grandes (1.5)
+        float sizeRoll = (float)(rand() % 100) / 100.0f;
+        float tamanoAleatorio;
+        if (sizeRoll < 0.3f)       tamanoAleatorio = 0.5f;
+        else if (sizeRoll < 0.8f)  tamanoAleatorio = 1.0f;
+        else                       tamanoAleatorio = 1.5f;
 
-    tiempoUltimoAsteroide = currentFrame;
+        // Instanciar el asteroide con la trayectoria Agujero Negro -> Nave
+        Asteroid nuevoAsteroide(puntoOrigen, puntoDestino, tamanoAleatorio);
+            
+        // Velocidad de eyección (puedes ajustarla si van muy rápido o lento)
+        //nuevoAsteroide.speed = 8.5f;
+        nuevoAsteroide.speed = velocidadAsteroideBase; //velocidad según el nivel actual
+        
+        // Agregar a la lista e igualar el reloj
+        listaAsteroides.push_back(nuevoAsteroide);
+        tiempoUltimoAsteroide = currentFrame; 
+    }
 }
 
 // Actualizar, dibujar y gestionar colisiones de todos los asteroides
@@ -698,7 +891,16 @@ void processAsteroids(float deltaTime, unsigned int shaderProgram, GLint normalM
                 vidas--;
                 std::cout << "[COLISION] Impacto! Vidas restantes: " << vidas << std::endl;
                 invincibleTimer = INVINCIBLE_DURATION;
-                listaAsteroides.erase(listaAsteroides.begin() + i);
+				//
+				if (listaAsteroides[i].isDestroyed()) {
+					asteroidesDestruidos++;
+					emitirExplosion(listaAsteroides[i].position, listaAsteroides[i].scale);
+
+					std::cout << "[DISPARO] Asteroide destruido!..." << std::endl;
+					listaAsteroides.erase(listaAsteroides.begin() + i);
+					removed = true;
+				}
+                //listaAsteroides.erase(listaAsteroides.begin() + i);
                 removed = true;
                 if (vidas <= 0) {
                     gameOver = true;
@@ -733,7 +935,7 @@ void processAsteroids(float deltaTime, unsigned int shaderProgram, GLint normalM
 
         // Eliminar asteroides fuera de rango
         if (!removed) {
-            if (listaAsteroides[i].position.z > 2.0f) {
+            if (listaAsteroides[i].position.z > 5.0f) {
                 asteroidesDestruidos++;
                 listaAsteroides.erase(listaAsteroides.begin() + i);
             } else {
@@ -758,6 +960,7 @@ void drawBullets(unsigned int shaderProgram, GLint normalMatrixLoc) {
         b.draw(shaderProgram);
     }
 }
+
 
 // Callback del mouse: controla hacia dónde mira la cabina de tu nave espacial
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
