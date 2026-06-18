@@ -58,7 +58,7 @@ std::vector<Particle> listaParticulas;
 // VARIABLES GLOBALES - SISTEMA DE BALAS (SHOOTING)
 std::vector<Bullet> listaBalas;
 float tiempoUltimoDisparo = 0.0f;
-const float FIRE_RATE = 0.15f; // segundos entre disparos
+const float FIRE_RATE = 0.30f; // segundos entre disparos
 unsigned int bulletTexID;      // textura 1x1 transparente para que el shader use vertex color
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height); //dimensionar la pantalla
@@ -124,21 +124,51 @@ void uploadLighting(unsigned int shaderProgram, const vec3& camPos) {
     float distToBH = helper::length(shipPos - bhPos);
     float proximityBoost = 1.0f + 5.0f * (1.0f / (1.0f + distToBH * 0.1f));
     glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].intensity"),
-        2.0f * proximityBoost);
+        3.0f * proximityBoost);
     glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].constant"), 1.0f);
-    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].linear"), 0.09f);
-    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].quadratic"), 0.032f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].linear"), 0.02f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[0].quadratic"), 0.005f);
 
     glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[1].position"),
         -50.0f, 30.0f, -20.0f);
     glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[1].color"),
         0.3f, 0.5f, 0.8f);
-    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].intensity"), 0.5f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].intensity"), 0.7f);
     glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].constant"), 1.0f);
     glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].linear"), 0.045f);
     glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[1].quadratic"), 0.0075f);
 
-    glUniform1i(glGetUniformLocation(shaderProgram, "numPointLights"), 2);
+    // Point light 2: ship headlight (warm cone in front)
+    vec3 shipForward = spaceship.getForward();
+    glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[2].position"),
+        shipPos.x + shipForward.x * 1.5f,
+        shipPos.y + shipForward.y * 1.5f,
+        shipPos.z + shipForward.z * 1.5f);
+    glUniform3f(glGetUniformLocation(shaderProgram, "pointLights[2].color"),
+        1.0f, 0.95f, 0.85f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[2].intensity"), 3.0f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[2].constant"), 1.0f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[2].linear"), 0.35f);
+    glUniform1f(glGetUniformLocation(shaderProgram, "pointLights[2].quadratic"), 0.44f);
+
+    // Point lights 3..7: up to 5 energy bullets as dynamic light sources
+    int numBulletLights = std::min((int)listaBalas.size(), 5);
+    for (int i = 0; i < numBulletLights; i++) {
+        int slot = 3 + i;
+        const Bullet& b = listaBalas[i];
+        std::string prefix = "pointLights[" + std::to_string(slot) + "]";
+        glUniform3f(glGetUniformLocation(shaderProgram, (prefix + ".position").c_str()),
+            b.position.x, b.position.y, b.position.z);
+        glUniform3f(glGetUniformLocation(shaderProgram, (prefix + ".color").c_str()),
+            0.5f, 0.85f, 1.0f);
+        glUniform1f(glGetUniformLocation(shaderProgram, (prefix + ".intensity").c_str()), 2.5f);
+        glUniform1f(glGetUniformLocation(shaderProgram, (prefix + ".constant").c_str()), 1.0f);
+        glUniform1f(glGetUniformLocation(shaderProgram, (prefix + ".linear").c_str()), 0.7f);
+        glUniform1f(glGetUniformLocation(shaderProgram, (prefix + ".quadratic").c_str()), 1.8f);
+    }
+
+    int totalLights = 3 + numBulletLights;
+    glUniform1i(glGetUniformLocation(shaderProgram, "numPointLights"), totalLights);
     glUniform3f(glGetUniformLocation(shaderProgram, "viewPos"), camPos.x, camPos.y, camPos.z);
 }
 
@@ -368,7 +398,7 @@ const char *fragmentShaderTexSource = "#version 330 core\n"
     "uniform vec3 ambientColor;\n"
 
     // Point lights (Phase 2)
-    "#define MAX_POINT_LIGHTS 4\n"
+    "#define MAX_POINT_LIGHTS 8\n"
     "struct PointLight {\n"
     "    vec3 position;\n"
     "    vec3 color;\n"
@@ -546,13 +576,13 @@ int main()
     glUniform3f(glGetUniformLocation(shaderProgram, "lightColor"),
         1.0f, 0.95f, 0.8f);       // warm sunlight
     glUniform1f(glGetUniformLocation(shaderProgram, "lightIntensity"),
-        1.0f);
+        1.4f);
 
     // Ambient light
     glUniform1f(glGetUniformLocation(shaderProgram, "ambientStrength"),
-        0.15f);                      // not too dark in shadows
+        0.4f);                       // brighter ambient for space
     glUniform3f(glGetUniformLocation(shaderProgram, "ambientColor"),
-        0.1f, 0.1f, 0.15f);         // slightly cool ambient for space
+        0.18f, 0.22f, 0.30f);       // cool blue ambient
 
     // Emissive defaults (off by default)
     glUniform1i(glGetUniformLocation(shaderProgram, "isEmissive"), GL_FALSE);
@@ -1075,13 +1105,18 @@ void drawAsteroids(unsigned int shaderProgram, GLint normalMatrixLoc) {
     }
 }
 
-// Dibujar todas las balas activas con textura transparente (vertex color)
+// Dibujar todas las balas activas con textura transparente (vertex color) — emissive energy
 void drawBullets(unsigned int shaderProgram, GLint normalMatrixLoc) {
 	GLint ourTextureLoc =
     glGetUniformLocation(shaderProgram, "ourTexture");
     glUniform1i(ourTextureLoc, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, bulletTexID);
+
+    // Energy bullets: emissive glow bypasses lighting
+    glUniform1i(glGetUniformLocation(shaderProgram, "isEmissive"), GL_TRUE);
+    glUniform3f(glGetUniformLocation(shaderProgram, "emissiveColor"), 1.2f, 1.6f, 1.8f);
+
     for (auto& b : listaBalas) {
         matriz4x4 bulletModel = b.getModelMatrix();
         std::array<float, 9> bulletNormalMat = helper::extract_normal_matrix(bulletModel);
@@ -1089,6 +1124,10 @@ void drawBullets(unsigned int shaderProgram, GLint normalMatrixLoc) {
         glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, bulletNormalMat.data());
         b.draw(shaderProgram);
     }
+
+    // Restore non-emissive state
+    glUniform1i(glGetUniformLocation(shaderProgram, "isEmissive"), GL_FALSE);
+    glUniform3f(glGetUniformLocation(shaderProgram, "emissiveColor"), 0.0f, 0.0f, 0.0f);
 }
 
 
