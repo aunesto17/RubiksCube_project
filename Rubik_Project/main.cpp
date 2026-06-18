@@ -33,6 +33,11 @@ unsigned int asteroideTexID;  // ID para la textura de los asteroides
 unsigned int ourTextureID;    // ID para la textura del Rubik
 unsigned int spaceshipTexID;  // ID para la textura de la nave
 
+// VARIABLES GLOBALES - ASTEROIDES DECORATIVOS (salen del BH en direcciones aleatorias)
+std::vector<Asteroid> listaAsteroidesDecorativos;
+float tiempoUltimoAsteroideDec = 0.0f;
+const float frecuenciaSpawnDec = 0.8f; // cada 0.8s
+
 // VARIABLES GLOBALES - ESTADO DEL JUEGO
 int vidas = 3;
 bool gameOver = bool(false);
@@ -95,6 +100,97 @@ Spaceship spaceship;
 ThrusterEffect thrusterEffect;
 
 BlackHole blackhole;
+
+// =========================================================================
+// DECORATIVE RUBIK'S CUBES (fixed positions, autonomous scramble/solve)
+// =========================================================================
+enum DecRubikPhase { DEC_WAIT, DEC_SCRAMBLE, DEC_SOLVE };
+struct DecorativeRubik {
+    CuboRubik* cube;
+    DecRubikPhase phase;
+    float waitTimer;
+    vec3 pos;
+    float scale;
+    float rotY;
+};
+std::vector<DecorativeRubik> listaRubikDecorativos;
+
+void spawnAsteroidsDecorativos(float currentFrame);
+void updateAsteroidesDecorativos(float deltaTime);
+void initRubikDecorativos(float currentTime) {
+    struct DecConfig { float x, y, z, sc, ry, wait; };
+    DecConfig configs[5] = {
+        {-10.0f,  8.0f, 10.0f, 0.8f,  20.0f, 1.0f},
+        { 12.0f, -7.0f, 25.0f, 1.2f, -15.0f, 3.0f},
+        {-11.0f, -8.0f, 45.0f, 0.6f,  35.0f, 5.0f},
+        { 10.0f,  9.0f, 60.0f, 1.0f, -25.0f, 7.0f},
+        { -9.0f,  7.0f, 75.0f, 0.9f,  10.0f, 9.0f}
+    };
+    for (int i = 0; i < 5; i++) {
+        CuboRubik* c = new CuboRubik(currentTime, camera);
+        c->init();
+        c->setVerbose(false);
+        DecorativeRubik dr;
+        dr.cube = c;
+        dr.phase = DEC_WAIT;
+        dr.waitTimer = configs[i].wait;
+        dr.pos = vec3(configs[i].x, configs[i].y, configs[i].z);
+        dr.scale = configs[i].sc;
+        dr.rotY = configs[i].ry;
+        listaRubikDecorativos.push_back(dr);
+    }
+}
+
+void updateRubikDecorativos(float dt) {
+    for (auto& dr : listaRubikDecorativos) {
+        dr.cube->update_animation(dt);
+        if (dr.cube->isSequenceRunning()) continue;
+        switch (dr.phase) {
+            case DEC_WAIT:
+                dr.waitTimer -= dt;
+                if (dr.waitTimer <= 0.0f) {
+                    dr.phase = DEC_SCRAMBLE;
+                    dr.cube->scrambleRubik(20);
+                    dr.cube->setSequenceSpeed(3.0f);
+                }
+                break;
+            case DEC_SCRAMBLE:
+                dr.phase = DEC_SOLVE;
+                dr.cube->solveRubik();
+                dr.cube->setSequenceSpeed(3.0f);
+                break;
+            case DEC_SOLVE:
+                dr.phase = DEC_WAIT;
+                dr.waitTimer = 3.0f;
+                break;
+        }
+    }
+}
+
+void drawRubikDecorativos(unsigned int shaderProgram, GLint modelLoc, GLint normalMatrixLoc) {
+    GLint ourTextureLoc = glGetUniformLocation(shaderProgram, "ourTexture");
+    glUniform1i(ourTextureLoc, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, ourTextureID);
+
+    for (auto& dr : listaRubikDecorativos) {
+        Transform t;
+        float ryRad = helper::toRadians(dr.rotY);
+        float cy = cosf(ryRad), sy = sinf(ryRad);
+        float s = dr.scale;
+        matriz4x4 model;
+        model.mat = {
+            s * cy,  0.0f,   s * sy,  dr.pos.x,
+            0.0f,    s,      0.0f,    dr.pos.y,
+           -s * sy,  0.0f,   s * cy,  dr.pos.z,
+            0.0f,    0.0f,   0.0f,    1.0f
+        };
+        std::array<float, 9> normalMat = helper::extract_normal_matrix(model);
+        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, model.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, normalMat.data());
+        dr.cube->draw(shaderProgram);
+    }
+}
 
 // =========================================================================
 // GAME MODE SYSTEM
@@ -198,6 +294,7 @@ void resetPosicionNave() {
     spaceship.pitch = 0.0f;
     listaAsteroides.clear();
     if (listaBalas.size() > 0) listaBalas.clear();
+    listaAsteroidesDecorativos.clear();
     thrusterEffect.particles.clear();
 }
 
@@ -568,6 +665,9 @@ int main()
     cuboRubik->init();
     cuboRubik->printMenu();
 
+    // Initialize decorative Rubik's cubes (fixed scenery outside corridor)
+    initRubikDecorativos(glfwGetTime());
+
     glUseProgram(shaderProgram);
 
     // ---- PHASE 1: Setup directional light (the sun) ----
@@ -665,6 +765,11 @@ int main()
         updateExplosionParticles(deltaTime);
         thrusterEffect.emit(spaceship.getPosition(), spaceship.getForward(), spaceship.getRight());
         thrusterEffect.update(deltaTime);
+
+        // Decorative scenery updates
+        spawnAsteroidsDecorativos(currentFrame);
+        updateAsteroidesDecorativos(deltaTime);
+        updateRubikDecorativos(deltaTime);
 
         // DETECCION DE VICTORIA / AVANCE DE NIVEL (solo en modo juego)
         if (currentMode == MODE_GAME && !gameOver) {
@@ -803,6 +908,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
             resetPosicionNave();
             listaAsteroides.clear();
             listaParticulas.clear();
+            listaAsteroidesDecorativos.clear();
             nivelActual = 1;
             vidas = 3;
             gameOver = false;
@@ -830,6 +936,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
             asteroidesDestruidos = 0;
             listaAsteroides.clear();
             listaBalas.clear();
+            listaAsteroidesDecorativos.clear();
             thrusterEffect.particles.clear();
             tiempoUltimoDisparo = 0.0f;
             spaceship.setPosition(vec3(0.0f, 0.0f, -10.0f));
@@ -1105,6 +1212,58 @@ void drawAsteroids(unsigned int shaderProgram, GLint normalMatrixLoc) {
     }
 }
 
+// Generar asteroides decorativos que salen del BH en direcciones aleatorias
+void spawnAsteroidsDecorativos(float currentFrame) {
+    if (currentMode != MODE_GAME) return;
+    if (currentFrame - tiempoUltimoAsteroideDec > frecuenciaSpawnDec) {
+        vec3 bhPos(blackhole.position[0], blackhole.position[1], blackhole.position[2]);
+
+        // Random unit-sphere direction
+        float rx = ((float)(rand() % 200) / 100.0f) - 1.0f;
+        float ry = ((float)(rand() % 200) / 100.0f) - 1.0f;
+        float rz = ((float)(rand() % 200) / 100.0f) - 1.0f;
+        float len = sqrtf(rx*rx + ry*ry + rz*rz);
+        if (len < 0.01f) { rx = 0.0f; ry = 0.0f; rz = 1.0f; len = 1.0f; }
+        vec3 targetPos(bhPos.x + rx/len * 5.0f, bhPos.y + ry/len * 5.0f, bhPos.z + rz/len * 5.0f);
+
+        float sizeRoll = (float)(rand() % 100) / 100.0f;
+        float tamano = sizeRoll < 0.4f ? 0.5f : (sizeRoll < 0.8f ? 0.8f : 1.2f);
+
+        Asteroid a(bhPos, targetPos, tamano);
+        a.speed = 3.0f + ((float)(rand() % 100) / 100.0f) * 2.0f; // 3-5 u/s
+        listaAsteroidesDecorativos.push_back(a);
+        tiempoUltimoAsteroideDec = currentFrame;
+    }
+}
+
+void updateAsteroidesDecorativos(float deltaTime) {
+    for (size_t i = 0; i < listaAsteroidesDecorativos.size(); ) {
+        listaAsteroidesDecorativos[i].update(deltaTime);
+        vec3 bhPos(blackhole.position[0], blackhole.position[1], blackhole.position[2]);
+        float dist = helper::length(listaAsteroidesDecorativos[i].position - bhPos);
+        if (dist > 120.0f) {
+            listaAsteroidesDecorativos.erase(listaAsteroidesDecorativos.begin() + i);
+        } else {
+            i++;
+        }
+    }
+}
+
+void drawAsteroidesDecorativos(unsigned int shaderProgram, GLint normalMatrixLoc) {
+    if (listaAsteroidesDecorativos.empty()) return;
+    GLint ourTextureLoc = glGetUniformLocation(shaderProgram, "ourTexture");
+    glUniform1i(ourTextureLoc, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, asteroideTexID);
+    for (size_t i = 0; i < listaAsteroidesDecorativos.size(); i++) {
+        matriz4x4 m = listaAsteroidesDecorativos[i].getModelMatrix();
+        std::array<float, 9> nm = helper::extract_normal_matrix(m);
+        glUniformMatrix4fv(modelLoc, 1, GL_TRUE, m.mat.data());
+        glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, nm.data());
+        listaAsteroidesDecorativos[i].draw(shaderProgram);
+    }
+}
+
 // Dibujar todas las balas activas con textura transparente (vertex color) — emissive energy
 void drawBullets(unsigned int shaderProgram, GLint normalMatrixLoc) {
 	GLint ourTextureLoc =
@@ -1170,8 +1329,12 @@ void renderScene(unsigned int shaderProgram, const matriz4x4& viewMatrix,
 
     // 5. Dibujar asteroides y particulas de explosion
     drawAsteroids(shaderProgram, normalMatrixLoc);
+    drawAsteroidesDecorativos(shaderProgram, normalMatrixLoc);
     drawExplosionParticles(shaderProgram, normalMatrixLoc);
     drawBullets(shaderProgram, normalMatrixLoc);
+
+    // 5b. Dibujar Rubiks decorativos (fixed scenery)
+    drawRubikDecorativos(shaderProgram, modelLoc, normalMatrixLoc);
 
     // 6. Dibujar nave espacial
     glUniform1i(ourTextureLoc, 0);

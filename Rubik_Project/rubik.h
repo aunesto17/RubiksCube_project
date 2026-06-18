@@ -32,6 +32,7 @@ private:
     // movimiento global del cubo
 	float acumTx = 0.0f, acumTy = 0.0f, acumTz = 0.0f;
 	float acumRotX = 0.0f, acumRotY = 0.0f;
+	bool verbose = true;  // suppress std::cout for decorative cubes
 
     float lastFrameTime;
 
@@ -120,6 +121,8 @@ public:
     }
 
     void setSequenceSpeed(float s);
+
+    void setVerbose(bool v) { verbose = v; }
 
     float getSequenceSpeed() const {
         return sequenceSpeedMultiplier;
@@ -271,7 +274,7 @@ void CuboRubik::draw(unsigned int shaderProgram) {
 }
 
 CuboRubik::CuboRubik(float lastFrameTime, Camera & cam) : lastFrameTime(lastFrameTime) {
-    std::cout << "Rubik's Cube Constructor" << std::endl;
+    if (verbose) std::cout << "Rubik's Cube Constructor" << std::endl;
     camera = &cam;
 }
 
@@ -286,7 +289,7 @@ void CuboRubik::init() {
 void CuboRubik::rotateFace(char face, float angle) {
     // Block new rotation requests while an animation is already running
     if (current_animation.is_running) {
-        std::cout << "[ANIMATION][BLOCKED] Rotation of face '" << face 
+        if (verbose) std::cout << "[ANIMATION][BLOCKED] Rotation of face '" << face 
                   << "' ignored because another rotation is currently animating." << std::endl;
         return;
     }
@@ -301,14 +304,14 @@ void CuboRubik::rotateFace(char face, float angle) {
         // Face rotation
         const auto& faceCubes = faceMap[std::string(1, face)];
         cubes_to_rotate.insert(cubes_to_rotate.end(), faceCubes.begin(), faceCubes.end());
-        std::cout << "[ANIMATION] Starting face rotation: face=" << face 
+        if (verbose) std::cout << "[ANIMATION] Starting face rotation: face=" << face 
                   << ", angle=" << angle << ", cubes=" << cubes_to_rotate.size() << std::endl;
     } else if (sliceMap.find(std::string(1, face)) != sliceMap.end()) {
         // Slice rotation
         const auto& sliceCubes = sliceMap[std::string(1, face)];
         cubes_to_rotate.insert(cubes_to_rotate.end(), sliceCubes.begin(), sliceCubes.end());
         is_slice = true;
-        std::cout << "[ANIMATION] Starting slice rotation: slice=" << face 
+        if (verbose) std::cout << "[ANIMATION] Starting slice rotation: slice=" << face 
                   << ", angle=" << angle << ", cubes=" << cubes_to_rotate.size() << std::endl;
     } else {
         std::cerr << "[ERROR][rotateFace] Unknown face or slice: '" << face << "'" << std::endl;
@@ -341,7 +344,7 @@ void CuboRubik::rotateFace(char face, float angle) {
     current_animation.is_clockwise = (angle < 0);  // Negative angle = clockwise in this convention
     current_animation.is_slice_rotation = is_slice;
 
-    std::cout << "[ANIMATION] Animation queued: face=" << face 
+    if (verbose) std::cout << "[ANIMATION] Animation queued: face=" << face 
               << ", target_angle=" << angle 
               << ", duration=" << current_animation.duration_seconds << "s" << std::endl;
 }
@@ -395,7 +398,7 @@ void CuboRubik::finalize_animation() {
         return;
     }
 
-    std::cout << "[ANIMATION] Finalizing rotation of face '" << current_animation.face 
+    if (verbose) std::cout << "[ANIMATION] Finalizing rotation of face '" << current_animation.face 
               << "' to exact angle " << current_animation.target_angle << " degrees." << std::endl;
 
     apply_rotation_to_affected_cubes(current_animation.target_angle);
@@ -410,7 +413,7 @@ void CuboRubik::finalize_animation() {
     current_animation.affected_cube_names.clear();
     current_animation.affected_cubes_starting_vertices.clear();
     
-    std::cout << "[ANIMATION] Rotation complete. Ready for next input." << std::endl;
+    if (verbose) std::cout << "[ANIMATION] Rotation complete. Ready for next input." << std::endl;
 }
 
 void CuboRubik::update_animation(float delta_time) {
@@ -436,8 +439,7 @@ void CuboRubik::update_animation(float delta_time) {
             current_animation.duration_seconds = 0.25f / sequenceSpeedMultiplier;
         } else if (isExecutingSequence) {
             isExecutingSequence = false;
-            std::cout << "[SEQUENCE] Complete." << std::endl;
-            printMenu();
+            if (verbose) { std::cout << "[SEQUENCE] Complete." << std::endl; printMenu(); }
         }
         return;
     }
@@ -455,8 +457,7 @@ void CuboRubik::update_animation(float delta_time) {
             current_animation.duration_seconds = 0.25f / sequenceSpeedMultiplier;
         } else if (isExecutingSequence) {
             isExecutingSequence = false;
-            std::cout << "[SEQUENCE] Complete." << std::endl;
-            printMenu();
+            if (verbose) { std::cout << "[SEQUENCE] Complete." << std::endl; printMenu(); }
         }
         return;
     }
@@ -468,14 +469,14 @@ void CuboRubik::update_animation(float delta_time) {
 void CuboRubik::setSequenceSpeed(float s) {
     if (s < 0.1f) s = 0.1f;
     sequenceSpeedMultiplier = s;
-    std::cout << "[SEQUENCE] Speed set to " << s << "x ("
+    if (verbose) std::cout << "[SEQUENCE] Speed set to " << s << "x ("
               << (0.25f / s) << "s per move)" << std::endl;
 }
 
 void CuboRubik::cancelSequence() {
     moveQueue.clear();
     isExecutingSequence = false;
-    std::cout << "[SEQUENCE] Cancelled. Current animation will finish naturally." << std::endl;
+    if (verbose) std::cout << "[SEQUENCE] Cancelled. Current animation will finish naturally." << std::endl;
 }
 
 void CuboRubik::updateFaceMapAfterRotation(char face, bool clockwise) {
@@ -1044,7 +1045,7 @@ void CuboRubik::rotateSS(bool clockwise) {
 void CuboRubik::resetRubik() {
     // Cancel any active animation to prevent stale data access after reset
     if (current_animation.is_running) {
-        std::cout << "[ANIMATION] Cancelling active animation due to cube reset." << std::endl;
+        if (verbose) std::cout << "[ANIMATION] Cancelling active animation due to cube reset." << std::endl;
         current_animation.is_running = false;
         current_animation.affected_cube_names.clear();
         current_animation.affected_cubes_starting_vertices.clear();
@@ -1059,7 +1060,7 @@ void CuboRubik::resetRubik() {
     sliceMap.clear();
     // initialize cubes
     initializeCubes();
-    std::cout << "Rubik's Cube Restored." << std::endl;
+    if (verbose) std::cout << "Rubik's Cube Restored." << std::endl;
 }
 
 void CuboRubik::printFaceMap(char face) {
@@ -1081,6 +1082,7 @@ void CuboRubik::printSliceMap(char slice) {
 }
 
 void CuboRubik::printMenu() const {
+    if (!verbose) return;
     std::cout << "\n=========================================" << std::endl;
     std::cout << "  MENU - CUBO RUBIK - CONTROL DE TECLAS" << std::endl;
     std::cout << "=========================================" << std::endl;
@@ -1235,14 +1237,14 @@ std::string CuboRubik::getFaceletString() {
 
 void CuboRubik::scrambleRubik(int numMoves) {
     if (current_animation.is_running || isExecutingSequence) {
-        std::cout << "[SCRAMBLE] Cannot start: animation or sequence already running." << std::endl;
+        if (verbose) std::cout << "[SCRAMBLE] Cannot start: animation or sequence already running." << std::endl;
         return;
     }
 
     std::vector<std::string> moves = ::scramble(numMoves);
     moveQueue.clear();
 
-    std::cout << "[SCRAMBLE] Generating " << numMoves << " random moves..." << std::endl;
+    if (verbose) std::cout << "[SCRAMBLE] Generating " << numMoves << " random moves..." << std::endl;
 
     for (const std::string& m : moves) {
         if (m.empty()) continue;
@@ -1261,13 +1263,13 @@ void CuboRubik::scrambleRubik(int numMoves) {
     }
 
     if (moveQueue.empty()) {
-        std::cout << "[SCRAMBLE] No valid moves generated." << std::endl;
+        if (verbose) std::cout << "[SCRAMBLE] No valid moves generated." << std::endl;
         return;
     }
 
     isExecutingSequence = true;
     sequenceSpeedMultiplier = 4.0f;
-    std::cout << "[SCRAMBLE] " << moveQueue.size() << " moves queued at "
+    if (verbose) std::cout << "[SCRAMBLE] " << moveQueue.size() << " moves queued at "
               << sequenceSpeedMultiplier << "x speed." << std::endl;
 }
 
@@ -1277,12 +1279,12 @@ void CuboRubik::scrambleRubik(int numMoves) {
 
 void CuboRubik::solveRubik() {
     if (current_animation.is_running || isExecutingSequence) {
-        std::cout << "[SOLVER] Cannot start: animation or sequence already running." << std::endl;
+        if (verbose) std::cout << "[SOLVER] Cannot start: animation or sequence already running." << std::endl;
         return;
     }
 
     std::string state = getFaceletString();
-    std::cout << "[SOLVER] Facelet string: " << state << std::endl;
+    if (verbose) std::cout << "[SOLVER] Facelet string: " << state << std::endl;
 
     if (state.find('?') != std::string::npos) {
         std::cerr << "[SOLVER] Error: facelet string contains unknown colors ('?'). "
@@ -1296,13 +1298,15 @@ void CuboRubik::solveRubik() {
         solution[0].size() > 0 && solution[0][0] != 'U' && solution[0][0] != 'R' &&
         solution[0][0] != 'F' && solution[0][0] != 'D' && solution[0][0] != 'L' &&
         solution[0][0] != 'B')) {
-        std::cout << "[SOLVER] Cube appears already solved or no solution returned." << std::endl;
+        if (verbose) std::cout << "[SOLVER] Cube appears already solved or no solution returned." << std::endl;
         return;
     }
 
-    std::cout << "[SOLVER] Solution: ";
-    for (const auto& m : solution) std::cout << m << " ";
-    std::cout << std::endl;
+    if (verbose) {
+        std::cout << "[SOLVER] Solution: ";
+        for (const auto& m : solution) std::cout << m << " ";
+        std::cout << std::endl;
+    }
 
     moveQueue.clear();
     for (const std::string& m : solution) {
@@ -1322,13 +1326,13 @@ void CuboRubik::solveRubik() {
     }
 
     if (moveQueue.empty()) {
-        std::cout << "[SOLVER] No valid moves in solution." << std::endl;
+        if (verbose) std::cout << "[SOLVER] No valid moves in solution." << std::endl;
         return;
     }
 
     isExecutingSequence = true;
     sequenceSpeedMultiplier = 1.5f;
-    std::cout << "[SOLVER] " << moveQueue.size() << " moves queued at "
+    if (verbose) std::cout << "[SOLVER] " << moveQueue.size() << " moves queued at "
               << sequenceSpeedMultiplier << "x speed." << std::endl;
 }
 
